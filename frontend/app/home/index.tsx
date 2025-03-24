@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react"
-import { View, Text, StyleSheet, Animated, PanResponder, Dimensions, TouchableOpacity } from "react-native"
+import { View, Text, StyleSheet, Animated, PanResponder, Dimensions, TouchableOpacity, Image } from "react-native"
 import { SafeAreaView } from "react-native-safe-area-context"
 import { Feather } from "@expo/vector-icons"
 import { FilterModal } from "../../components/filter"
@@ -95,8 +95,6 @@ export default function Home() {
     }
   }
 
-  // ... rest of the component code (panResponder, swipe functions, etc.)
-
   const renderCards = () => {
     if (currentIndex >= posts.length) {
       return (
@@ -146,7 +144,17 @@ export default function Home() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>AITA</Text>
+        <View style={styles.logoTitleContainer}>
+          <Image 
+            source={require('../../assets/images/aitalogo.png')} 
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <View style={styles.headerTitleContainer}>
+            <Text style={[styles.headerTitlePart, styles.orangeText]}>AI</Text>
+            <Text style={[styles.headerTitlePart, styles.greenText]}>TA</Text>
+          </View>
+        </View>
         <TouchableOpacity style={styles.filterButton} onPress={() => setShowFilterModal(true)}>
           <Feather name="filter" size={22} color="#4A5568" />
         </TouchableOpacity>
@@ -186,11 +194,27 @@ const styles = StyleSheet.create({
     zIndex: 10,
     borderBottomWidth: 0,
   },
-  headerTitle: {
+  logoTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  logo: {
+    width: 30,
+    height: 30,
+    marginRight: 8,
+  },
+  headerTitleContainer: {
+    flexDirection: 'row',
+  },
+  headerTitlePart: {
     fontSize: 24,
-    fontWeight: "700",
-    color: "#FF4500",
-    letterSpacing: 0.5,
+    fontWeight: 'bold',
+  },
+  orangeText: {
+    color: '#FF4500',
+  },
+  greenText: {
+    color: '#48BB78',
   },
   filterButton: {
     padding: 8,

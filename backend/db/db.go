@@ -11,6 +11,7 @@ import (
 )
 
 var Client *mongo.Client
+var database *mongo.Database
 
 func Connect(uri string) {
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -29,4 +30,13 @@ func Connect(uri string) {
 
     fmt.Println("Connected to MongoDB!")
     Client = client
+    database = client.Database("aita") // Use the "aita" database
+}
+
+// GetDB returns the database instance
+func GetDB() *mongo.Database {
+    if database == nil {
+        log.Fatal("Database connection not initialized. Call Connect() first.")
+    }
+    return database
 }

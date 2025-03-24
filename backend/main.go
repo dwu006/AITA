@@ -25,6 +25,9 @@ func main() {
 	// fmt.Println("Password:", os.Getenv("REDDIT_PASSWORD"))
 	// fmt.Println("User Agent:", os.Getenv("REDDIT_USER_AGENT"))
 
+	// Connect to the database first
+	db.Connect(os.Getenv("MONGO_URI"))
+
 	rc, err := controller.NewRedditController(
 		os.Getenv("REDDIT_CLIENT_ID"),
 		os.Getenv("REDDIT_CLIENT_SECRET"),
@@ -36,17 +39,25 @@ func main() {
 		panic(err)
 	}
 
+	// Initialize the UserController with a JWT secret
+	jwtSecret := os.Getenv("JWT_SECRET")
+	uc := controller.NewUserController(jwtSecret)
+
 	router := gin.Default()
 
-	// Enable CORS
-	router.Use(cors.Default())
+	// Enhanced CORS configuration
+	config := cors.DefaultConfig()
+	config.AllowAllOrigins = true
+	config.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+	config.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
+	router.Use(cors.New(config))
 	
 	// Set trusted proxies
 	router.SetTrustedProxies([]string{"127.0.0.1"})
 
-	db.Connect(os.Getenv("MONGO_URI"))
-
+	// Register routes
 	routes.RegisterRedditRoutes(router, rc)
+	routes.RegisterUserRoutes(router, uc)
 
 	fmt.Println("Connected! Listening on http://localhost:8080")
 	// Start the server

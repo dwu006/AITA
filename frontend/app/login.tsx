@@ -1,67 +1,442 @@
-import { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useState, useEffect } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TextInput, 
+  TouchableOpacity, 
+  KeyboardAvoidingView, 
+  Platform,
+  Animated,
+  PanResponder,
+  Dimensions,
+  Alert,
+  Image
+} from 'react-native';
+import { useRouter, Link } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Feather } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export default function LoginScreen() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const SWIPE_THRESHOLD = 80;
+
+// Function to get the base URL based on platform
+const getBaseUrl = (): string => {
+  if (__DEV__) {
+    if (Platform.OS === 'android') {
+      // Use actual IP address for Expo Go
+      return 'http://10.0.0.147:8080';
+    } else if (Platform.OS === 'ios') {
+      // Use actual IP address for iOS 
+      return 'http://10.0.0.147:8080';
+    } else {
+      return 'http://localhost:8080'; // Web
+    }
+  }
+  // Return production URL if not in development
+  return 'https://your-production-server.com';
+};
+
+// Define types
+interface UserData {
+  username: string;
+  [key: string]: any; // For any additional fields
+}
+
+interface LoginScreenProps {
+  // Add any props here if needed
+}
+
+// Random username data
+const randomUsernamePrefixes = ['Judge', 'Moral', 'Ethical', 'Truth', 'Fair', 'Just', 'Honest', 'Noble', 'Wise', 'Logic', 'Reason', 'Virtue', 'Karma', 'Jury', 'Court', 'Opinion', 'Insight', 'Choice', 'Decision', 'Verdict'];
+const randomUsernameSuffixes = ['Seeker', 'Finder', 'Master', 'Guru', 'Expert', 'Whiz', 'Pro', 'Ace', 'Sage', 'Mind', 'Thinker', 'Judge', 'Critic', 'Voice', 'Speaker', 'Observer', 'Watcher', 'Guardian'];
+const randomNumbers = ['', '123', '42', '007', '99', '2025', '777', '365', '247', '101'];
+
+export default function LoginScreen(props: LoginScreenProps) {
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState('login');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [apiUrl, setApiUrl] = useState('');
+  
+  // Separate state variables for login
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  
+  // Separate state variables for register
+  const [registerUsername, setRegisterUsername] = useState('');
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  
+  // Set API URL on component mount
+  useEffect(() => {
+    const url = getBaseUrl();
+    console.log('Setting API URL:', url);
+    setApiUrl(url);
+  }, []);
 
-  const handleLogin = () => {
+  // Animation for swipe gesture
+  const position = useState(new Animated.ValueXY())[0];
+  
+  const panResponder = PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onPanResponderMove: (_, gesture) => {
+      if (gesture.dx > 0) {
+        // Only allow swiping right
+        position.setValue({ x: gesture.dx, y: 0 });
+      }
+    },
+    onPanResponderRelease: (_, gesture) => {
+      if (gesture.dx > SWIPE_THRESHOLD) {
+        // Navigate immediately when threshold is reached
+        router.replace('/');
+      } else {
+        // Reset position if not enough to trigger
+        Animated.spring(position, {
+          toValue: { x: 0, y: 0 },
+          friction: 5,
+          tension: 40,
+          useNativeDriver: true,
+        }).start();
+      }
+    }
+  });
+
+  // Function to store JWT token
+  const storeToken = async (token: string): Promise<void> => {
+    try {
+      await AsyncStorage.setItem('authToken', token);
+    } catch (e) {
+      console.error("Failed to save auth token", e);
+    }
+  };
+
+  // Function to store user data
+  const storeUserData = async (userData: UserData): Promise<void> => {
+    try {
+      await AsyncStorage.setItem('userData', JSON.stringify(userData));
+    } catch (e) {
+      console.error("Failed to save user data", e);
+    }
+  };
+
+  // Function to generate a random username
+  const generateRandomUsername = () => {
+    const prefix = randomUsernamePrefixes[Math.floor(Math.random() * randomUsernamePrefixes.length)];
+    const suffix = randomUsernameSuffixes[Math.floor(Math.random() * randomUsernameSuffixes.length)];
+    const number = randomNumbers[Math.floor(Math.random() * randomNumbers.length)];
+    
+    return `${prefix}${suffix}${number}`;
+  };
+  
+  // Handle random username button press
+  const handleRandomUsername = () => {
+    setRegisterUsername(generateRandomUsername());
+  };
+
+  const handleLogin = async (): Promise<void> => {
+    // Reset error
+    setError('');
+    
     // Simple validation
-    if (!username || !password) {
-      setError('Please enter both username and password');
+    if (!loginUsername) {
+      setError('Please enter your username');
       return;
     }
     
-    // In a real app, you would authenticate with your backend here
-    // For now, we'll just navigate to the main page
-    router.replace('/home');
+    if (!loginPassword) {
+      setError('Please enter your password');
+      return;
+    }
+    
+    try {
+      setIsLoading(true);
+      
+      const response = await fetch(`${apiUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: loginUsername,
+          password: loginPassword,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        setError(data.error || 'Login failed');
+        return;
+      }
+      
+      // Store token and user data
+      await storeToken(data.token);
+      await storeUserData(data.user);
+      
+      // Navigate to home screen
+      router.replace('/home');
+    } catch (err) {
+      console.error('Login error:', err);
+      setError('Network error. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  const handleRegister = async (): Promise<void> => {
+    // Reset error
     setError('');
+    
+    // Validation
+    if (!registerUsername) {
+      setError('Please enter a username');
+      return;
+    }
+    
+    if (!registerPassword) {
+      setError('Please enter a password');
+      return;
+    }
+    
+    if (registerPassword !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+    
+    try {
+      setIsLoading(true);
+      console.log('Attempting to register with:', apiUrl);
+      
+      const response = await fetch(`${apiUrl}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: registerUsername,
+          password: registerPassword,
+        }),
+      });
+      
+      const data = await response.json();
+      console.log('Registration response status:', response.status);
+      console.log('Registration response:', data);
+      
+      if (!response.ok) {
+        // More detailed error handling
+        if (data.error) {
+          setError(`Registration failed: ${data.error}`);
+        } else if (response.status === 409) {
+          setError('Username already exists. Please choose another username.');
+        } else if (response.status >= 500) {
+          setError('Server error. Please try again later.');
+        } else {
+          setError(`Registration failed with status: ${response.status}`);
+        }
+        return;
+      }
+      
+      // Store token and user data
+      if (data.token) {
+        await storeToken(data.token);
+      } else {
+        console.warn('No token received from registration');
+      }
+      
+      if (data.user) {
+        await storeUserData(data.user);
+      } else {
+        console.warn('No user data received from registration');
+      }
+      
+      // Show success alert and navigate to instructions
+      Alert.alert(
+        'Success',
+        'Your account has been created successfully!',
+        [{ text: 'OK', onPress: () => router.replace('/instructions') }]
+      );
+    } catch (err) {
+      console.error('Registration error:', err);
+      setError('Network error. Please check your connection and try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardAvoid}
-      >
-        <View style={styles.content}>
-          <Text style={styles.title}>Login</Text>
-          <Text style={styles.subtitle}>Login using your Reddit credentials</Text>
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.container}
+    >
+      <SafeAreaView style={styles.safeContainer}>
+        {/* Logo and Title */}
+        <View style={styles.logoContainer}>
+          <Image 
+            source={require('../assets/images/aitalogo.png')} 
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <View style={styles.titleContainer}>
+            <Text style={[styles.titleText, styles.orangeText]}>AI</Text>
+            <Text style={[styles.titleText, styles.greenText]}>TA</Text>
+          </View>
+        </View>
+
+        <Animated.View 
+          style={[
+            styles.content, 
+            {
+              transform: [{ translateX: position.x }]
+            }
+          ]}
+          {...panResponder.panHandlers}
+        >
+          <View style={styles.tabsContainer}>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'login' && styles.activeTab]}
+              onPress={() => setActiveTab('login')}
+            >
+              <Text style={[styles.tabText, activeTab === 'login' && styles.activeTabText]}>Login</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'register' && styles.activeTab]}
+              onPress={() => setActiveTab('register')}
+            >
+              <Text style={[styles.tabText, activeTab === 'register' && styles.activeTabText]}>Register</Text>
+            </TouchableOpacity>
+          </View>
           
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
           
-          <View style={styles.inputContainer}>
-            {/* <Text style={styles.label}>Username</Text> */}
-            <TextInput
-              style={styles.input}
-              value={username}
-              onChangeText={setUsername}
-              placeholder="Username"
-              autoCapitalize="none"
-            />
-          </View>
-          
-          <View style={styles.inputContainer}>
-            {/* <Text style={styles.label}>Password</Text> */}
-            <TextInput
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Password"
-              secureTextEntry
-            />
-          </View>
-          
-          <TouchableOpacity style={styles.button} onPress={handleLogin}>
-            <Text style={styles.buttonText}>Login</Text>
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+          {activeTab === 'login' ? (
+            <>                
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  value={loginUsername}
+                  onChangeText={setLoginUsername}
+                  placeholder="Username"
+                  placeholderTextColor="gray"
+                  autoCapitalize="none"
+                  editable={!isLoading}
+                />
+              </View>
+              
+              <View style={styles.inputContainer}>
+                <View style={styles.passwordContainer}>
+                  <TextInput
+                    style={styles.passwordInput}
+                    value={loginPassword}
+                    onChangeText={setLoginPassword}
+                    placeholder="Password"
+                    placeholderTextColor="gray"
+                    secureTextEntry={!showLoginPassword}
+                    editable={!isLoading}
+                  />
+                  <TouchableOpacity 
+                    style={styles.visibilityToggle}
+                    onPress={() => setShowLoginPassword(!showLoginPassword)}
+                    disabled={isLoading}
+                  >
+                    <Feather name={showLoginPassword ? "eye-off" : "eye"} size={20} color="#718096" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              <TouchableOpacity 
+                style={[styles.button, isLoading && styles.buttonDisabled]} 
+                onPress={handleLogin}
+                disabled={isLoading}
+              >
+                <Text style={styles.buttonText}>
+                  {isLoading ? 'Logging in...' : 'Login'}
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>                
+              <View style={styles.inputContainer}>
+                <View style={styles.inputWithButtonContainer}>
+                  <TextInput
+                    style={styles.inputWithButton}
+                    value={registerUsername}
+                    onChangeText={setRegisterUsername}
+                    placeholder="Username"
+                    placeholderTextColor="gray"
+                    autoCapitalize="none"
+                    editable={!isLoading}
+                  />
+                  <TouchableOpacity 
+                    style={styles.randomButton} 
+                    onPress={handleRandomUsername}
+                    disabled={isLoading}
+                  >
+                    <Feather name="shuffle" size={20} color="#718096" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              <View style={styles.inputContainer}>
+                <View style={styles.passwordContainer}>
+                  <TextInput
+                    style={styles.passwordInput}
+                    value={registerPassword}
+                    onChangeText={setRegisterPassword}
+                    placeholder="Password"
+                    placeholderTextColor="gray"
+                    secureTextEntry={!showRegisterPassword}
+                    editable={!isLoading}
+                  />
+                  <TouchableOpacity 
+                    style={styles.visibilityToggle}
+                    onPress={() => setShowRegisterPassword(!showRegisterPassword)}
+                    disabled={isLoading}
+                  >
+                    <Feather name={showRegisterPassword ? "eye-off" : "eye"} size={20} color="#718096" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              <View style={styles.inputContainer}>
+                <View style={styles.passwordContainer}>
+                  <TextInput
+                    style={styles.passwordInput}
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    placeholder="Confirm Password"
+                    placeholderTextColor="gray"
+                    secureTextEntry={!showConfirmPassword}
+                    editable={!isLoading}
+                  />
+                  <TouchableOpacity 
+                    style={styles.visibilityToggle}
+                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                    disabled={isLoading}
+                  >
+                    <Feather name={showConfirmPassword ? "eye-off" : "eye"} size={20} color="#718096" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              <TouchableOpacity 
+                style={[styles.button, isLoading && styles.buttonDisabled]} 
+                onPress={handleRegister}
+                disabled={isLoading}
+              >
+                <Text style={styles.buttonText}>
+                  {isLoading ? 'Creating Account...' : 'Register'}
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </Animated.View>
+      </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -70,8 +445,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  keyboardAvoid: {
+  safeContainer: {
     flex: 1,
+    backgroundColor: '#FFFFFF',
   },
   content: {
     flex: 1,
@@ -79,26 +455,57 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
-  title: {
+  logoContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+  },
+  logo: {
+    width: 100,
+    height: 100,
+  },
+  titleContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  titleText: {
     fontSize: 32,
     fontWeight: 'bold',
-    marginBottom: 10,
-    color: '#333',
   },
-  subtitle: {
-    fontSize: 16,
-    color: '#718096',
+  orangeText: {
+    color: '#FFA07A',
+  },
+  greenText: {
+    color: '#34C759',
+  },
+  tabsContainer: {
+    flexDirection: 'row',
     marginBottom: 30,
-    textAlign: 'center',
+    borderRadius: 10,
+    overflow: 'hidden',
+    backgroundColor: '#F7FAFC',
+    width: '100%',
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  activeTab: {
+    backgroundColor: '#FF4500',
+  },
+  tabText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4A5568',
+  },
+  activeTabText: {
+    color: '#FFFFFF',
   },
   inputContainer: {
     width: '100%',
     marginBottom: 20,
-  },
-  label: {
-    fontSize: 16,
-    marginBottom: 8,
-    color: '#4A5568',
   },
   input: {
     width: '100%',
@@ -109,6 +516,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
     fontSize: 16,
     backgroundColor: '#F7FAFC',
+  },
+  passwordContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#CBD5E0',
+    borderRadius: 8,
+    backgroundColor: '#F7FAFC',
+  },
+  passwordInput: {
+    flex: 1,
+    height: 50,
+    paddingHorizontal: 15,
+    fontSize: 16,
+  },
+  visibilityToggle: {
+    paddingHorizontal: 15,
+    height: 50,
+    justifyContent: 'center',
   },
   button: {
     backgroundColor: '#FF4500',
@@ -123,6 +549,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 3,
   },
+  buttonDisabled: {
+    backgroundColor: '#FFA07A',
+  },
   buttonText: {
     color: 'white',
     fontSize: 18,
@@ -133,5 +562,26 @@ const styles = StyleSheet.create({
     color: '#E53E3E',
     marginBottom: 15,
     fontSize: 16,
+    alignSelf: 'center',
+  },
+  inputWithButtonContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 8,
+    backgroundColor: '#F7FAFC',
+  },
+  inputWithButton: {
+    flex: 1,
+    height: 50,
+    paddingHorizontal: 15,
+    color: '#2D3748',
+  },
+  randomButton: {
+    padding: 10,
+    marginRight: 5,
+    borderRadius: 8,
   },
 });
