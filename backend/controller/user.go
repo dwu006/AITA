@@ -17,9 +17,17 @@ import (
 
 // User represents the user model stored in the database
 type User struct {
-	Username string    `json:"username" bson:"username"`
-	Password string    `json:"-" bson:"password"` // Password is not included in JSON responses
-	CreatedAt time.Time `json:"created_at" bson:"created_at"`
+	Username    string            `json:"username" bson:"username"`
+	Name        string            `json:"name" bson:"name"`
+	Password    string            `json:"-" bson:"password"` // Password is not included in JSON responses
+	CreatedAt   time.Time         `json:"created_at" bson:"created_at"`
+	NumPosts    int               `json:"num_posts" bson:"num_posts"`
+	FavCategory string            `json:"fav_category" bson:"fav_category"`
+	Accuracy    float64           `json:"accuracy" bson:"accuracy"`
+	PFP         string            `json:"pfp" bson:"pfp"` // URL or base64 encoded image
+	PostHistory map[string]string `json:"post_history" bson:"post_history"` // Map of post_id to judgment
+	StreakDates []time.Time       `json:"streak_dates" bson:"streak_dates"`
+	StreakCount int               `json:"streak_count" bson:"streak_count"`
 }
 
 // UserLogin represents the login request body
@@ -31,6 +39,7 @@ type UserLogin struct {
 // UserRegister represents the registration request body
 type UserRegister struct {
 	Username string `json:"username" binding:"required"`
+	Name     string `json:"name" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
 
@@ -84,8 +93,16 @@ func (uc *UserController) Register(c *gin.Context) {
 	// Create new user
 	newUser := User{
 		Username:  userRegister.Username,
+		Name:      userRegister.Name,
 		Password:  string(hashedPassword),
 		CreatedAt: time.Now(),
+		NumPosts:  0,
+		FavCategory: "",
+		Accuracy:  0.0,
+		PFP: "https://static.vecteezy.com/system/resources/previews/009/292/244/non_2x/default-avatar-icon-of-social-media-user-vector.jpg",
+		PostHistory: make(map[string]string),
+		StreakDates: []time.Time{},
+		StreakCount: 0,
 	}
 
 	_, err = uc.collection.InsertOne(context.Background(), newUser)
@@ -106,7 +123,15 @@ func (uc *UserController) Register(c *gin.Context) {
 		"token":   token,
 		"user": gin.H{
 			"username":   newUser.Username,
+			"name":       newUser.Name,
 			"created_at": newUser.CreatedAt,
+			"num_posts":  newUser.NumPosts,
+			"fav_category":  newUser.FavCategory,
+			"accuracy":  newUser.Accuracy,
+			"pfp":  newUser.PFP,
+			"post_history":  newUser.PostHistory,
+			"streak_dates":  newUser.StreakDates,
+			"streak_count":  newUser.StreakCount,
 		},
 	})
 }
@@ -155,7 +180,15 @@ func (uc *UserController) Login(c *gin.Context) {
 		"token":   token,
 		"user": gin.H{
 			"username":   user.Username,
+			"name":       user.Name,
 			"created_at": user.CreatedAt,
+			"num_posts":  user.NumPosts,
+			"fav_category":  user.FavCategory,
+			"accuracy":  user.Accuracy,
+			"pfp":  user.PFP,
+			"post_history":  user.PostHistory,
+			"streak_dates":  user.StreakDates,
+			"streak_count":  user.StreakCount,
 		},
 	})
 }
@@ -166,6 +199,55 @@ func (uc *UserController) Logout(c *gin.Context) {
 	// by removing the token, but we'll return a success message anyway
 	c.JSON(200, gin.H{
 		"message": "Logout successful",
+	})
+}
+
+// FetchUser retrieves the user data for the currently authenticated user
+func (uc *UserController) FetchUser(c *gin.Context) {
+	// Get the username from the authenticated context
+	username, exists := c.Get("username")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "User not authenticated",
+		})
+		return
+	}
+
+	// Find the user in the database
+	var user User
+	err := uc.collection.FindOne(
+		context.Background(),
+		bson.M{"username": username},
+	).Decode(&user)
+
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "User not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to fetch user data",
+		})
+		return
+	}
+
+	// Return the user data
+	c.JSON(http.StatusOK, gin.H{
+		"user": gin.H{
+			"username":     user.Username,
+			"name":         user.Name,
+			"created_at":   user.CreatedAt,
+			"num_posts":    user.NumPosts,
+			"fav_category": user.FavCategory,
+			"accuracy":     user.Accuracy,
+			"pfp":          user.PFP,
+			"post_history": user.PostHistory,
+			"streak_dates": user.StreakDates,
+			"streak_count": user.StreakCount,
+		},
 	})
 }
 

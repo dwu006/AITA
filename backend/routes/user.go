@@ -22,7 +22,7 @@ func RegisterUserRoutes(router *gin.Engine, uc *controller.UserController) {
 	{
 		// Add protected user routes here when needed
 		// For example:
-		// userRoutes.GET("/profile", uc.GetProfile)
+		userRoutes.GET("/profile", uc.FetchUser)
 		// userRoutes.PUT("/profile", uc.UpdateProfile)
 	}
 }

@@ -11,10 +11,11 @@ import {
   PanResponder,
   Dimensions,
   Alert,
-  Image
+  Image,
+  ScrollView,
+  SafeAreaView
 } from 'react-native';
 import { useRouter, Link } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -71,6 +72,7 @@ export default function LoginScreen(props: LoginScreenProps) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [registerName, setRegisterName] = useState('');
   
   // Set API URL on component mount
   useEffect(() => {
@@ -192,14 +194,9 @@ export default function LoginScreen(props: LoginScreenProps) {
     // Reset error
     setError('');
     
-    // Validation
-    if (!registerUsername) {
-      setError('Please enter a username');
-      return;
-    }
-    
-    if (!registerPassword) {
-      setError('Please enter a password');
+    // Check if fields are empty
+    if (!registerUsername.trim() || !registerPassword.trim() || !registerName.trim()) {
+      setError('Please fill in all fields');
       return;
     }
     
@@ -219,6 +216,7 @@ export default function LoginScreen(props: LoginScreenProps) {
         },
         body: JSON.stringify({
           username: registerUsername,
+          name: registerName,
           password: registerPassword,
         }),
       });
@@ -270,171 +268,178 @@ export default function LoginScreen(props: LoginScreenProps) {
 
   return (
     <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      style={styles.container}
+      style={styles.container} 
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 80 : 20}
     >
-      <SafeAreaView style={styles.safeContainer}>
-        {/* Logo and Title */}
-        <View style={styles.logoContainer}>
-          <Image 
-            source={require('../assets/images/aitalogo.png')} 
-            style={styles.logo}
-            resizeMode="contain"
-          />
-          <View style={styles.titleContainer}>
-            <Text style={[styles.titleText, styles.orangeText]}>AI</Text>
-            <Text style={[styles.titleText, styles.greenText]}>TA</Text>
-          </View>
-        </View>
-
-        <Animated.View 
-          style={[
-            styles.content, 
-            {
-              transform: [{ translateX: position.x }]
-            }
-          ]}
-          {...panResponder.panHandlers}
+      <SafeAreaView style={{ flex: 1 }}>
+        <ScrollView 
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <View style={styles.tabsContainer}>
-            <TouchableOpacity
-              style={[styles.tab, activeTab === 'login' && styles.activeTab]}
-              onPress={() => setActiveTab('login')}
-            >
-              <Text style={[styles.tabText, activeTab === 'login' && styles.activeTabText]}>Login</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tab, activeTab === 'register' && styles.activeTab]}
-              onPress={() => setActiveTab('register')}
-            >
-              <Text style={[styles.tabText, activeTab === 'register' && styles.activeTabText]}>Register</Text>
-            </TouchableOpacity>
+          <View style={styles.logoContainer}>
+            <Image 
+              source={require('../assets/images/aitalogo.png')} 
+              style={styles.logo}
+              resizeMode="contain"
+            />
+            <View style={styles.titleTextContainer}>
+              <Text style={[styles.titleText, styles.orangeText]}>AI</Text>
+              <Text style={[styles.titleText, styles.greenText]}>TA</Text>
+            </View>
           </View>
-          
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
-          
-          {activeTab === 'login' ? (
-            <>                
-              <View style={styles.inputContainer}>
-                <TextInput
-                  style={styles.input}
-                  value={loginUsername}
-                  onChangeText={setLoginUsername}
-                  placeholder="Username"
-                  placeholderTextColor="gray"
-                  autoCapitalize="none"
-                  editable={!isLoading}
-                />
-              </View>
-              
-              <View style={styles.inputContainer}>
-                <View style={styles.passwordContainer}>
-                  <TextInput
-                    style={styles.passwordInput}
-                    value={loginPassword}
-                    onChangeText={setLoginPassword}
-                    placeholder="Password"
-                    placeholderTextColor="gray"
-                    secureTextEntry={!showLoginPassword}
-                    editable={!isLoading}
-                  />
-                  <TouchableOpacity 
-                    style={styles.visibilityToggle}
-                    onPress={() => setShowLoginPassword(!showLoginPassword)}
-                    disabled={isLoading}
-                  >
-                    <Feather name={showLoginPassword ? "eye-off" : "eye"} size={20} color="#718096" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-              
-              <TouchableOpacity 
-                style={[styles.button, isLoading && styles.buttonDisabled]} 
-                onPress={handleLogin}
-                disabled={isLoading}
+          <View style={styles.formContainer}>
+            <View style={styles.tabContainer}>
+              <TouchableOpacity
+                style={[styles.tab, activeTab === 'login' && styles.activeTab]}
+                onPress={() => setActiveTab('login')}
               >
-                <Text style={styles.buttonText}>
-                  {isLoading ? 'Logging in...' : 'Login'}
-                </Text>
+                <Text style={[styles.tabText, activeTab === 'login' && styles.activeTabText]}>Login</Text>
               </TouchableOpacity>
-            </>
-          ) : (
-            <>                
-              <View style={styles.inputContainer}>
-                <View style={styles.inputWithButtonContainer}>
+              <TouchableOpacity
+                style={[styles.tab, activeTab === 'register' && styles.activeTab]}
+                onPress={() => setActiveTab('register')}
+              >
+                <Text style={[styles.tabText, activeTab === 'register' && styles.activeTabText]}>Register</Text>
+              </TouchableOpacity>
+            </View>
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+            {activeTab === 'login' ? (
+              <>                
+                <View style={styles.inputContainer}>
                   <TextInput
-                    style={styles.inputWithButton}
-                    value={registerUsername}
-                    onChangeText={setRegisterUsername}
+                    style={styles.input}
+                    value={loginUsername}
+                    onChangeText={setLoginUsername}
                     placeholder="Username"
                     placeholderTextColor="gray"
                     autoCapitalize="none"
                     editable={!isLoading}
                   />
-                  <TouchableOpacity 
-                    style={styles.randomButton} 
-                    onPress={handleRandomUsername}
-                    disabled={isLoading}
-                  >
-                    <Feather name="shuffle" size={20} color="#718096" />
-                  </TouchableOpacity>
                 </View>
-              </View>
-              
-              <View style={styles.inputContainer}>
-                <View style={styles.passwordContainer}>
+                
+                <View style={styles.inputContainer}>
+                  <View style={styles.passwordContainer}>
+                    <TextInput
+                      style={styles.passwordInput}
+                      value={loginPassword}
+                      onChangeText={setLoginPassword}
+                      placeholder="Password"
+                      placeholderTextColor="gray"
+                      secureTextEntry={!showLoginPassword}
+                      editable={!isLoading}
+                    />
+                    <TouchableOpacity 
+                      style={styles.visibilityToggle}
+                      onPress={() => setShowLoginPassword(!showLoginPassword)}
+                      disabled={isLoading}
+                    >
+                      <Feather name={showLoginPassword ? "eye-off" : "eye"} size={20} color="#718096" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                
+                <TouchableOpacity 
+                  style={[styles.loginButton, isLoading && styles.buttonDisabled]} 
+                  onPress={handleLogin}
+                  disabled={isLoading}
+                >
+                  <Text style={styles.buttonText}>
+                    {isLoading ? 'Logging in...' : 'Login'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>                
+                <View style={styles.inputContainer}>
                   <TextInput
-                    style={styles.passwordInput}
-                    value={registerPassword}
-                    onChangeText={setRegisterPassword}
-                    placeholder="Password"
+                    style={styles.input}
+                    value={registerName}
+                    onChangeText={setRegisterName}
+                    placeholder="Full Name"
                     placeholderTextColor="gray"
-                    secureTextEntry={!showRegisterPassword}
+                    autoCapitalize="words"
                     editable={!isLoading}
                   />
-                  <TouchableOpacity 
-                    style={styles.visibilityToggle}
-                    onPress={() => setShowRegisterPassword(!showRegisterPassword)}
-                    disabled={isLoading}
-                  >
-                    <Feather name={showRegisterPassword ? "eye-off" : "eye"} size={20} color="#718096" />
-                  </TouchableOpacity>
                 </View>
-              </View>
-              
-              <View style={styles.inputContainer}>
-                <View style={styles.passwordContainer}>
-                  <TextInput
-                    style={styles.passwordInput}
-                    value={confirmPassword}
-                    onChangeText={setConfirmPassword}
-                    placeholder="Confirm Password"
-                    placeholderTextColor="gray"
-                    secureTextEntry={!showConfirmPassword}
-                    editable={!isLoading}
-                  />
-                  <TouchableOpacity 
-                    style={styles.visibilityToggle}
-                    onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                    disabled={isLoading}
-                  >
-                    <Feather name={showConfirmPassword ? "eye-off" : "eye"} size={20} color="#718096" />
-                  </TouchableOpacity>
+                
+                <View style={styles.inputContainer}>
+                  <View style={[styles.inputWithButtonContainer, { borderColor: '#E2E8F0', borderWidth: 1, borderRadius: 8 }]}>
+                    <TextInput
+                      style={[styles.inputWithButton, { color: '#2D3748', fontSize: 15 }]}
+                      value={registerUsername}
+                      onChangeText={setRegisterUsername}
+                      placeholder="Username"
+                      placeholderTextColor="gray"
+                      autoCapitalize="none"
+                      editable={!isLoading}
+                    />
+                    <TouchableOpacity 
+                      style={styles.randomButton} 
+                      onPress={handleRandomUsername}
+                      disabled={isLoading}
+                    >
+                      <Feather name="shuffle" size={20} color="#718096" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
-              
-              <TouchableOpacity 
-                style={[styles.button, isLoading && styles.buttonDisabled]} 
-                onPress={handleRegister}
-                disabled={isLoading}
-              >
-                <Text style={styles.buttonText}>
-                  {isLoading ? 'Creating Account...' : 'Register'}
-                </Text>
-              </TouchableOpacity>
-            </>
-          )}
-        </Animated.View>
+                
+                <View style={styles.inputContainer}>
+                  <View style={styles.passwordContainer}>
+                    <TextInput
+                      style={styles.passwordInput}
+                      value={registerPassword}
+                      onChangeText={setRegisterPassword}
+                      placeholder="Password"
+                      placeholderTextColor="gray"
+                      secureTextEntry={!showRegisterPassword}
+                      editable={!isLoading}
+                    />
+                    <TouchableOpacity 
+                      style={styles.visibilityToggle}
+                      onPress={() => setShowRegisterPassword(!showRegisterPassword)}
+                      disabled={isLoading}
+                    >
+                      <Feather name={showRegisterPassword ? "eye-off" : "eye"} size={20} color="#718096" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                
+                <View style={styles.inputContainer}>
+                  <View style={styles.passwordContainer}>
+                    <TextInput
+                      style={styles.passwordInput}
+                      value={confirmPassword}
+                      onChangeText={setConfirmPassword}
+                      placeholder="Confirm Password"
+                      placeholderTextColor="gray"
+                      secureTextEntry={!showConfirmPassword}
+                      editable={!isLoading}
+                    />
+                    <TouchableOpacity 
+                      style={styles.visibilityToggle}
+                      onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+                      disabled={isLoading}
+                    >
+                      <Feather name={showConfirmPassword ? "eye-off" : "eye"} size={20} color="#718096" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                
+                <TouchableOpacity 
+                  style={[styles.loginButton, isLoading && styles.buttonDisabled]} 
+                  onPress={handleRegister}
+                  disabled={isLoading}
+                >
+                  <Text style={styles.buttonText}>
+                    {isLoading ? 'Creating Account...' : 'Register'}
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </ScrollView>
       </SafeAreaView>
     </KeyboardAvoidingView>
   );
@@ -445,143 +450,135 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  safeContainer: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
   },
   logoContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 20,
-  },
-  logo: {
-    width: 100,
-    height: 100,
-  },
-  titleContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 10,
+    height: 50,
+  },
+  logo: {
+    width: 40,
+    height: 40,
+    marginRight: 8,
+  },
+  titleTextContainer: {
+    flexDirection: 'row',
   },
   titleText: {
-    fontSize: 32,
+    fontSize: 36,
     fontWeight: 'bold',
   },
   orangeText: {
-    color: '#FFA07A',
+    color: '#FF4500',
   },
   greenText: {
-    color: '#34C759',
+    color: '#48BB78',
   },
-  tabsContainer: {
-    flexDirection: 'row',
-    marginBottom: 30,
+  formContainer: {
+    backgroundColor: 'white',
     borderRadius: 10,
-    overflow: 'hidden',
-    backgroundColor: '#F7FAFC',
-    width: '100%',
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  activeTab: {
-    backgroundColor: '#FF4500',
-  },
-  tabText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#4A5568',
-  },
-  activeTabText: {
-    color: '#FFFFFF',
-  },
-  inputContainer: {
+    paddingHorizontal: 15,
+    paddingVertical: 15,
     width: '100%',
     marginBottom: 20,
   },
+  tabContainer: {
+    flexDirection: 'row',
+    marginBottom: 15,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  activeTab: {
+    borderBottomWidth: 2,
+    borderBottomColor: '#FF4500',
+  },
+  tabText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#4A5568',
+  },
+  activeTabText: {
+    color: '#FF4500',
+    fontWeight: '600',
+  },
+  inputContainer: {
+    marginBottom: 12,
+  },
   input: {
-    width: '100%',
-    height: 50,
+    height: 45,
     borderWidth: 1,
-    borderColor: '#CBD5E0',
+    borderColor: '#E2E8F0',
     borderRadius: 8,
     paddingHorizontal: 15,
-    fontSize: 16,
+    fontSize: 15,
     backgroundColor: '#F7FAFC',
+    color: '#2D3748',
   },
   passwordContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#CBD5E0',
+    borderColor: '#E2E8F0',
     borderRadius: 8,
     backgroundColor: '#F7FAFC',
   },
   passwordInput: {
     flex: 1,
-    height: 50,
+    height: 45,
     paddingHorizontal: 15,
-    fontSize: 16,
+    fontSize: 15,
+    color: '#2D3748',
   },
-  visibilityToggle: {
-    paddingHorizontal: 15,
-    height: 50,
-    justifyContent: 'center',
-  },
-  button: {
+  loginButton: {
     backgroundColor: '#FF4500',
-    paddingVertical: 15,
-    paddingHorizontal: 40,
-    borderRadius: 30,
-    marginTop: 20,
-    width: '100%',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  loginButtonDisabled: {
+    backgroundColor: '#FFA07A',
   },
   buttonDisabled: {
     backgroundColor: '#FFA07A',
   },
   buttonText: {
     color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    fontWeight: '600',
+    fontSize: 16,
   },
   errorText: {
     color: '#E53E3E',
     marginBottom: 15,
-    fontSize: 16,
-    alignSelf: 'center',
+    textAlign: 'center',
   },
   inputWithButtonContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     width: '100%',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 8,
     backgroundColor: '#F7FAFC',
   },
   inputWithButton: {
     flex: 1,
-    height: 50,
+    height: 45,
     paddingHorizontal: 15,
-    color: '#2D3748',
   },
   randomButton: {
     padding: 10,
-    marginRight: 5,
-    borderRadius: 8,
+  },
+  visibilityToggle: {
+    paddingHorizontal: 15,
+    height: 45,
+    justifyContent: 'center',
   },
 });
