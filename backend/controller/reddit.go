@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 	
 	"golang.org/x/oauth2"
@@ -100,8 +101,11 @@ func (rc *RedditController) GetSubredditPosts(subreddit string, limit int, timeF
         return nil, fmt.Errorf("invalid time filter: %s", timeFilter)
     }
 
+    // Request more posts than needed to account for filtering
+    apiLimit := limit + 5
+
     url := fmt.Sprintf("https://oauth.reddit.com/r/%s/top?limit=%d&t=%s&raw_json=1", 
-        subreddit, limit, timeFilter)
+        subreddit, apiLimit, timeFilter)
 
     resp, err := rc.client.Get(url)
     if err != nil {
@@ -125,8 +129,32 @@ func (rc *RedditController) GetSubredditPosts(subreddit string, limit int, timeF
         return nil, fmt.Errorf("failed to decode response: %w", err)
     }
 
-    posts := make([]Post, 0, len(response.Data.Children)-1)
-    for _, child := range response.Data.Children[1:] {
+    // Filter out open forum posts and limit to exact count requested
+    filteredChildren := make([]struct {
+        Data Post `json:"data"`
+    }, 0, len(response.Data.Children))
+    for _, child := range response.Data.Children {
+        // Skip posts that contain open forum identifiers
+        if strings.Contains(strings.ToLower(child.Data.Title), "open forum") || 
+           strings.Contains(strings.ToLower(child.Data.Title), "monthly discussion") {
+            continue
+        }
+        
+        // Only include self posts (text posts)
+        if !child.Data.IsSelf {
+            continue
+        }
+        
+        filteredChildren = append(filteredChildren, child)
+        
+        // Stop if we have enough posts
+        if len(filteredChildren) >= limit {
+            break
+        }
+    }
+
+    posts := make([]Post, 0, len(filteredChildren))
+    for _, child := range filteredChildren {
         post := child.Data
 
         // Get comments concurrently with a timeout
@@ -203,4 +231,75 @@ func (rc *RedditController) GetPostComments(postID string) ([]string, error) {
     }
 
     return commentList, nil
+}
+
+// GetPost retrieves a specific post from Reddit by its ID
+func (rc *RedditController) GetPost(postID string) (*Post, error) {
+    // URL for fetching a single post by ID
+    url := fmt.Sprintf("https://oauth.reddit.com/by_id/t3_%s", postID)
+    
+    resp, err := rc.client.Get(url)
+    if err != nil {
+        return nil, fmt.Errorf("failed to get post: %w", err)
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        return nil, fmt.Errorf("post API returned status: %d", resp.StatusCode)
+    }
+
+    var response struct {
+        Data struct {
+            Children []struct {
+                Data struct {
+                    Title      string  `json:"title"`
+                    URL        string  `json:"url"`
+                    Score      int     `json:"score"`
+                    CreatedUTC float64 `json:"created_utc"`
+                    Author     string  `json:"author"`
+                    NumComments int    `json:"num_comments"`
+                    SelfText   string  `json:"selftext"`
+                    ID         string  `json:"id"`
+                    IsSelf     bool    `json:"is_self"`
+                    Subreddit  string  `json:"subreddit"`
+                } `json:"data"`
+            } `json:"children"`
+        } `json:"data"`
+    }
+
+    if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+        return nil, fmt.Errorf("failed to decode post: %w", err)
+    }
+
+    // Check if we got valid data
+    if len(response.Data.Children) == 0 {
+        return nil, fmt.Errorf("post not found: %s", postID)
+    }
+
+    // Get the first child's data (should be only one for single post)
+    postData := response.Data.Children[0].Data
+
+    // Create the post object
+    post := &Post{
+        Title:       postData.Title,
+        URL:         postData.URL,
+        Score:       postData.Score,
+        CreatedUTC:  postData.CreatedUTC,
+        Author:      postData.Author,
+        NumComments: postData.NumComments,
+        SelfText:    postData.SelfText,
+        PostID:      postData.ID,
+        IsSelf:      postData.IsSelf,
+    }
+
+    // Fetch comments for this post
+    comments, err := rc.GetPostComments(postID)
+    if err != nil {
+        // Log but don't fail if comments can't be fetched
+        fmt.Printf("Warning: Could not fetch comments for post %s: %v\n", postID, err)
+    } else {
+        post.Comments = comments
+    }
+
+    return post, nil
 }

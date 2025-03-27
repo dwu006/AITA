@@ -23,6 +23,14 @@ func RegisterUserRoutes(router *gin.Engine, uc *controller.UserController) {
 		// Add protected user routes here when needed
 		// For example:
 		userRoutes.GET("/profile", uc.FetchUser)
-		// userRoutes.PUT("/profile", uc.UpdateProfile)
+		userRoutes.PUT("/update", uc.UpdateUser)
+		userRoutes.POST("/post-history", uc.AddPostToHistory) // Add post to user's history
+	}
+
+	// Leaderboard routes - protected by auth middleware
+	leaderboardRoutes := router.Group("/api/users")
+	leaderboardRoutes.Use(uc.AuthMiddleware())
+	{
+		leaderboardRoutes.GET("/leaderboard", uc.GetLeaderboard) // Get user rankings
 	}
 }

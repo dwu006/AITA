@@ -12,6 +12,7 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -249,6 +250,415 @@ func (uc *UserController) FetchUser(c *gin.Context) {
 			"streak_count": user.StreakCount,
 		},
 	})
+}
+
+// UpdateUser updates a user's profile information
+func (uc *UserController) UpdateUser(c *gin.Context) {
+	// Get username from authenticated context
+	username, exists := c.Get("username")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	// Find the existing user
+	var user User
+	err := uc.collection.FindOne(context.Background(), bson.M{"username": username}).Decode(&user)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find user"})
+		return
+	}
+
+	// Parse form data - for multipart form with potential file upload
+	if err := c.Request.ParseMultipartForm(10 << 20); err != nil { // 10 MB max
+		// If not multipart form, try binding JSON
+		var updateData struct {
+			Name            string `json:"name"`
+			Username        string `json:"username"`
+			CurrentPassword string `json:"current_password,omitempty"`
+			NewPassword     string `json:"new_password,omitempty"`
+		}
+
+		if err := c.ShouldBindJSON(&updateData); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+			return
+		}
+
+		// Continue with JSON data
+		updateFields, validationError := validateAndPrepareUpdate(c, updateData.Name, updateData.Username, 
+			updateData.CurrentPassword, updateData.NewPassword, "", user, uc)
+		if validationError != nil {
+			return // Error response already sent by validateAndPrepareUpdate
+		}
+
+		// Update user in database
+		_, err = uc.collection.UpdateOne(
+			context.Background(),
+			bson.M{"username": username},
+			bson.M{"$set": updateFields},
+		)
+
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
+			return
+		}
+
+		// Fetch updated user data
+		var updatedUser User
+		err = uc.collection.FindOne(context.Background(), bson.M{"username": updateFields["username"]}).Decode(&updatedUser)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "User updated but failed to retrieve updated data"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "User updated successfully",
+			"user": updatedUser,
+		})
+		return
+	}
+
+	// Process form fields
+	name := c.PostForm("name")
+	newUsername := c.PostForm("username")
+	currentPassword := c.PostForm("current_password")
+	newPassword := c.PostForm("new_password")
+
+	// Process file if included
+	profilePicURL := user.PFP // Default to current PFP
+	file, _, err := c.Request.FormFile("profile_pic")
+	if err == nil {
+		defer file.Close()
+		
+		// In a real implementation, you would:
+		// 1. Check file type (verify it's an image)
+		// 2. Generate a unique filename
+		// 3. Save to storage (filesystem, S3, etc.)
+		// 4. Store the URL/path to the saved file
+
+		// Here we're just creating a placeholder URL - in reality you'd save the file and return its actual URL
+		profilePicURL = fmt.Sprintf("/uploads/%s-%d.jpg", newUsername, time.Now().Unix())
+		
+		// Example code for saving to local filesystem - uncomment if needed:
+		/*
+		uploadPath := "./uploads/"
+		if err := os.MkdirAll(uploadPath, 0755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create upload directory"})
+			return
+		}
+		
+		dst, err := os.Create(fmt.Sprintf("%s%s", uploadPath, header.Filename))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save image"})
+			return
+		}
+		defer dst.Close()
+		
+		if _, err = io.Copy(dst, file); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save image"})
+			return
+		}
+		profilePicURL = fmt.Sprintf("/uploads/%s", header.Filename)
+		*/
+	}
+
+	// Validate and prepare update
+	updateFields, validationError := validateAndPrepareUpdate(c, name, newUsername, 
+		currentPassword, newPassword, profilePicURL, user, uc)
+	if validationError != nil {
+		return // Error response already sent by validateAndPrepareUpdate
+	}
+
+	// Update user in database
+	_, err = uc.collection.UpdateOne(
+		context.Background(),
+		bson.M{"username": username},
+		bson.M{"$set": updateFields},
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
+		return
+	}
+
+	// Fetch updated user data
+	var updatedUser User
+	err = uc.collection.FindOne(context.Background(), bson.M{"username": updateFields["username"]}).Decode(&updatedUser)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "User updated but failed to retrieve updated data"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "User updated successfully",
+		"user": updatedUser,
+	})
+}
+
+// AddPostToHistory adds a post and its judgment to the user's history
+func (uc *UserController) AddPostToHistory(c *gin.Context) {
+	// Extract username from JWT
+	username, exists := c.Get("username")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not logged in"})
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		PostID   string `json:"post_id" binding:"required"`
+		Judgment string `json:"judgment" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format", "details": err.Error()})
+		return
+	}
+
+	// Validate judgment (must be YTA or NTA)
+	if req.Judgment != "YTA" && req.Judgment != "NTA" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Judgment must be either 'YTA' or 'NTA'"})
+		return
+	}
+
+	// Fetch the user
+	var user User
+	err := uc.collection.FindOne(
+		context.Background(),
+		bson.M{"username": username},
+	).Decode(&user)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find user", "details": err.Error()})
+		return
+	}
+
+	// Initialize post history map if it doesn't exist
+	if user.PostHistory == nil {
+		user.PostHistory = make(map[string]string)
+	}
+
+	// Add the post to history
+	user.PostHistory[req.PostID] = req.Judgment
+
+	// Update NumPosts count
+	user.NumPosts = len(user.PostHistory)
+
+	// Update streak information
+	today := time.Now().Truncate(24 * time.Hour)
+	
+	// Check if already swiped today
+	alreadySwipedToday := false
+	for _, date := range user.StreakDates {
+		if date.Truncate(24 * time.Hour).Equal(today) {
+			alreadySwipedToday = true
+			break
+		}
+	}
+	
+	// If not swiped today, add to streak
+	if !alreadySwipedToday {
+		user.StreakDates = append(user.StreakDates, today)
+		
+		// Check if streak is continuous by looking at yesterday
+		yesterday := today.Add(-24 * time.Hour)
+		hadSwipeYesterday := false
+		
+		for _, date := range user.StreakDates {
+			if date.Truncate(24 * time.Hour).Equal(yesterday) {
+				hadSwipeYesterday = true
+				break
+			}
+		}
+		
+		if hadSwipeYesterday || len(user.StreakDates) == 1 {
+			// Either this is the first swipe ever or we swiped yesterday too
+			user.StreakCount++
+		} else {
+			// Streak broken
+			user.StreakCount = 1
+		}
+	}
+
+	// Limit streak dates history to last 30 days to keep the array size manageable
+	if len(user.StreakDates) > 30 {
+		user.StreakDates = user.StreakDates[len(user.StreakDates)-30:]
+	}
+
+	// Update the user in the database
+	update := bson.M{
+		"$set": bson.M{
+			"post_history":  user.PostHistory,
+			"num_posts":     user.NumPosts,
+			"streak_dates":  user.StreakDates,
+			"streak_count":  user.StreakCount,
+		},
+	}
+
+	_, err = uc.collection.UpdateOne(
+		context.Background(),
+		bson.M{"username": username},
+		update,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user history", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Post added to history",
+		"num_posts": user.NumPosts,
+		"streak_count": user.StreakCount,
+	})
+}
+
+// GetLeaderboard retrieves user rankings sorted by specified criteria
+func (uc *UserController) GetLeaderboard(c *gin.Context) {
+	// Get the sort criteria from query parameter
+	sortBy := c.DefaultQuery("sort", "overall")
+	
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
+	// Find all users (excluding password field)
+	cursor, err := uc.collection.Find(
+		ctx,
+		bson.M{}, // No filter, get all users
+		options.Find().SetProjection(bson.M{
+			"username": 1,
+			"name": 1,
+			"num_posts": 1,
+			"accuracy": 1,
+			"pfp": 1,
+			"_id": 1,
+		}),
+	)
+	
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve users", "details": err.Error()})
+		return
+	}
+	defer cursor.Close(ctx)
+	
+	// Decode all users
+	var users []User
+	if err := cursor.All(ctx, &users); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode users", "details": err.Error()})
+		return
+	}
+	
+	// Sort users based on criteria
+	switch sortBy {
+	case "accuracy":
+		// Sort by accuracy (highest first)
+		for i := 0; i < len(users)-1; i++ {
+			for j := i + 1; j < len(users); j++ {
+				if users[i].Accuracy < users[j].Accuracy {
+					users[i], users[j] = users[j], users[i]
+				}
+			}
+		}
+	case "num_posts":
+		// Sort by number of posts judged (highest first)
+		for i := 0; i < len(users)-1; i++ {
+			for j := i + 1; j < len(users); j++ {
+				if users[i].NumPosts < users[j].NumPosts {
+					users[i], users[j] = users[j], users[i]
+				}
+			}
+		}
+	default: // "overall" or any other value
+		// Sort by a weighted combination of accuracy and posts
+		for i := 0; i < len(users)-1; i++ {
+			for j := i + 1; j < len(users); j++ {
+				// Calculate overall score (70% accuracy, 30% posts)
+				scoreI := users[i].Accuracy*0.7 + float64(users[i].NumPosts)*0.3/5
+				scoreJ := users[j].Accuracy*0.7 + float64(users[j].NumPosts)*0.3/5
+				if scoreI < scoreJ {
+					users[i], users[j] = users[j], users[i]
+				}
+			}
+		}
+	}
+	
+	// Limit to top 50 users for performance
+	if len(users) > 50 {
+		users = users[:50]
+	}
+	
+	c.JSON(http.StatusOK, users)
+}
+
+// Helper function to validate and prepare user update
+func validateAndPrepareUpdate(c *gin.Context, name, newUsername, currentPassword, newPassword, profilePicURL string, user User, uc *UserController) (bson.M, error) {
+	updateFields := bson.M{}
+
+	// Validate required fields
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Name is required"})
+		return nil, errors.New("name is required")
+	}
+	updateFields["name"] = name
+
+	// If username changed, verify it's unique
+	if newUsername != "" && newUsername != user.Username {
+		// Check if new username is already taken
+		var existingUser User
+		err := uc.collection.FindOne(
+			context.Background(),
+			bson.M{"username": newUsername},
+		).Decode(&existingUser)
+
+		if err == nil {
+			// Username already exists
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Username already taken"})
+			return nil, errors.New("username already taken")
+		} else if !errors.Is(err, mongo.ErrNoDocuments) {
+			// Database error
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+			return nil, errors.New("database error")
+		}
+
+		updateFields["username"] = newUsername
+	} else if newUsername == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Username is required"})
+		return nil, errors.New("username is required")
+	} else {
+		updateFields["username"] = user.Username
+	}
+
+	// Handle password update if provided
+	if newPassword != "" {
+		if currentPassword == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Current password is required to update password"})
+			return nil, errors.New("current password required")
+		}
+
+		// Verify current password
+		err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(currentPassword))
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Current password is incorrect"})
+			return nil, errors.New("incorrect current password")
+		}
+
+		// Hash new password
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+			return nil, errors.New("failed to hash password")
+		}
+
+		updateFields["password"] = string(hashedPassword)
+	}
+
+	// Update profile picture if provided
+	if profilePicURL != "" && profilePicURL != user.PFP {
+		updateFields["pfp"] = profilePicURL
+	}
+
+	return updateFields, nil
 }
 
 // generateToken creates a new JWT token for a user

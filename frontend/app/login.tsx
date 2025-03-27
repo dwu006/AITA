@@ -49,6 +49,9 @@ interface LoginScreenProps {
   // Add any props here if needed
 }
 
+// Define path types for strong typing
+type AppPath = '/' | '/home' | '/login' | '/instructions';
+
 // Random username data
 const randomUsernamePrefixes = ['Judge', 'Moral', 'Ethical', 'Truth', 'Fair', 'Just', 'Honest', 'Noble', 'Wise', 'Logic', 'Reason', 'Virtue', 'Karma', 'Jury', 'Court', 'Opinion', 'Insight', 'Choice', 'Decision', 'Verdict'];
 const randomUsernameSuffixes = ['Seeker', 'Finder', 'Master', 'Guru', 'Expert', 'Whiz', 'Pro', 'Ace', 'Sage', 'Mind', 'Thinker', 'Judge', 'Critic', 'Voice', 'Speaker', 'Observer', 'Watcher', 'Guardian'];
@@ -95,7 +98,7 @@ export default function LoginScreen(props: LoginScreenProps) {
     onPanResponderRelease: (_, gesture) => {
       if (gesture.dx > SWIPE_THRESHOLD) {
         // Navigate immediately when threshold is reached
-        router.replace('/');
+        router.replace('/home');
       } else {
         // Reset position if not enough to trigger
         Animated.spring(position, {
@@ -140,17 +143,22 @@ export default function LoginScreen(props: LoginScreenProps) {
     setRegisterUsername(generateRandomUsername());
   };
 
-  const handleLogin = async (): Promise<void> => {
+  // Login authenticates a user and returns a JWT token
+  const handleLogin = async (username?: string, password?: string, redirectPath?: AppPath): Promise<void> => {
     // Reset error
     setError('');
     
+    // Use provided credentials or form values
+    const loginUser = username || loginUsername;
+    const loginPass = password || loginPassword;
+    
     // Simple validation
-    if (!loginUsername) {
+    if (!loginUser) {
       setError('Please enter your username');
       return;
     }
     
-    if (!loginPassword) {
+    if (!loginPass) {
       setError('Please enter your password');
       return;
     }
@@ -164,8 +172,8 @@ export default function LoginScreen(props: LoginScreenProps) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          username: loginUsername,
-          password: loginPassword,
+          username: loginUser,
+          password: loginPass,
         }),
       });
       
@@ -180,8 +188,8 @@ export default function LoginScreen(props: LoginScreenProps) {
       await storeToken(data.token);
       await storeUserData(data.user);
       
-      // Navigate to home screen
-      router.replace('/home');
+      // Navigate to specified path or home screen
+      router.replace(redirectPath || '/home');
     } catch (err) {
       console.error('Login error:', err);
       setError('Network error. Please try again.');
@@ -239,25 +247,25 @@ export default function LoginScreen(props: LoginScreenProps) {
         return;
       }
       
-      // Store token and user data
+      // Store token and user data from registration
       if (data.token) {
         await storeToken(data.token);
+        
+        if (data.user) {
+          await storeUserData(data.user);
+        } else {
+          console.warn('No user data received from registration');
+        }
+        
+        // Navigate directly to instructions page
+        router.replace('/instructions');
       } else {
         console.warn('No token received from registration');
+        
+        // Since no token was received, we need to log in manually
+        await handleLogin(registerUsername, registerPassword, '/instructions');
+        return; // Return early since handleLogin will handle navigation
       }
-      
-      if (data.user) {
-        await storeUserData(data.user);
-      } else {
-        console.warn('No user data received from registration');
-      }
-      
-      // Show success alert and navigate to instructions
-      Alert.alert(
-        'Success',
-        'Your account has been created successfully!',
-        [{ text: 'OK', onPress: () => router.replace('/instructions') }]
-      );
     } catch (err) {
       console.error('Registration error:', err);
       setError('Network error. Please check your connection and try again.');
@@ -279,6 +287,12 @@ export default function LoginScreen(props: LoginScreenProps) {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.logoContainer}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.replace('/')}
+            >
+              <Feather name="arrow-left" size={24} color="#000" />
+            </TouchableOpacity>
             <Image 
               source={require('../assets/images/aitalogo.png')} 
               style={styles.logo}
@@ -342,7 +356,7 @@ export default function LoginScreen(props: LoginScreenProps) {
                 
                 <TouchableOpacity 
                   style={[styles.loginButton, isLoading && styles.buttonDisabled]} 
-                  onPress={handleLogin}
+                  onPress={() => handleLogin()}
                   disabled={isLoading}
                 >
                   <Text style={styles.buttonText}>
@@ -462,6 +476,13 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginBottom: 10,
     height: 50,
+    position: 'relative',
+  },
+  backButton: {
+    position: 'absolute',
+    left: 0,
+    padding: 5,
+    zIndex: 10,
   },
   logo: {
     width: 40,

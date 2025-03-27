@@ -9,6 +9,7 @@ import (
 	"github.com/dwu006/aita/routes"
 	"github.com/dwu006/aita/db"
 	"github.com/joho/godotenv"
+	"github.com/dwu006/aita/api"
 )
 
 
@@ -43,6 +44,13 @@ func main() {
 	jwtSecret := os.Getenv("JWT_SECRET")
 	uc := controller.NewUserController(jwtSecret)
 
+	// Initialize Gemini controller
+	gc, err := api.NewGeminiController()
+	if err != nil {
+		fmt.Println("Failed to initialize Gemini controller:", err)
+		panic(err)
+	}
+
 	router := gin.Default()
 
 	// Enhanced CORS configuration
@@ -58,6 +66,7 @@ func main() {
 	// Register routes
 	routes.RegisterRedditRoutes(router, rc)
 	routes.RegisterUserRoutes(router, uc)
+	routes.RegisterGeminiRoutes(router, gc)
 
 	fmt.Println("Connected! Listening on http://localhost:8080")
 	// Start the server

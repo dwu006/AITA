@@ -27,5 +27,18 @@ func RegisterRedditRoutes(router *gin.Engine, rc *controller.RedditController) {
 				"results":   posts,
 			})
 		})
+		
+		// New route to get a specific post by ID
+		redditRoutes.GET("/id/:postId", func(c *gin.Context) {
+			postID := c.Param("postId")
+			
+			post, err := rc.GetPost(postID)
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			
+			c.JSON(200, post)
+		})
 	}
 }

@@ -18,9 +18,12 @@ export function FilterModal({ visible, onClose }: FilterModalProps) {
     "Money",
     "Roommates",
     "Friends",
+    "School",
     "Weddings",
     "Parenting",
     "In-Laws",
+    "Public",
+    "Revenge",
     "Neighbors",
   ]
 

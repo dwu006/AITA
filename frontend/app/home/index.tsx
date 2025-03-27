@@ -1,69 +1,255 @@
-import { useState, useRef, useEffect } from "react"
-import { View, Text, StyleSheet, Animated, PanResponder, Dimensions, TouchableOpacity, Image } from "react-native"
+import React, { useState, useEffect, useRef, useCallback } from "react"
+import { View, Text, StyleSheet, Dimensions, Animated, PanResponder, TouchableOpacity, Alert, ScrollView, Image, Platform } from "react-native"
 import { SafeAreaView } from "react-native-safe-area-context"
+import AsyncStorage from "@react-native-async-storage/async-storage"
+import { useRouter, useFocusEffect } from "expo-router"
 import { Feather } from "@expo/vector-icons"
 import { FilterModal } from "../../components/filter"
 
-const SCREEN_WIDTH = Dimensions.get("window").width
-const SCREEN_HEIGHT = Dimensions.get("window").height
-const SWIPE_THRESHOLD = 120
+// Placeholder function until you recreate the actual module files
+const useSession = () => {
+  return {
+    signOut: () => {},
+    authState: { isAuthenticated: true, userId: '123' }
+  }
+}
+
+// Placeholder for API URL until you recreate the actual module
+const getBaseUrl = () => {
+  if (Platform.OS === 'android') {
+    // For Android use the IP address
+    return 'http://10.0.0.147:8080';
+  } else if (Platform.OS === 'ios') {
+    // For iOS use the IP address
+    return 'http://10.0.0.147:8080';
+  }
+  // For web or fallback
+  return 'http://localhost:8080';
+}
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window")
+const SWIPE_THRESHOLD = 30; // Further reduced for easier detection
+
+// Define the Post interface to fix TypeScript errors
+interface Post {
+  id: string;
+  title: string;
+  content: string;
+  category: string;
+  upvotes: number;
+  comments: number;
+  tldr: string;
+}
 
 export default function Home() {
-  const [posts, setPosts] = useState([])
+  const [posts, setPosts] = useState<Post[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [showFilterModal, setShowFilterModal] = useState(false)
+  const [showTldr, setShowTldr] = useState(false)
+  const [swipeDirection, setSwipeDirection] = useState<string | null>(null)
+  const [isExpanded, setIsExpanded] = useState(false)
+  const [authToken, setAuthToken] = useState<string | null>(null)
+  const [lastJudgment, setLastJudgment] = useState<string | null>(null)
+  const [showConfirmation, setShowConfirmation] = useState(false)
+  const [lastSwipedPost, setLastSwipedPost] = useState<Post | null>(null)
+  const [communityStats, setCommunityStats] = useState({ yesPercent: 50, noPercent: 50 })
+  const [aiJudgment, setAiJudgment] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
+
   const position = useRef(new Animated.ValueXY()).current
 
-  useEffect(() => {
-    fetchPosts()
-  }, [])
+  // Update the useEffect for checking auth token
+  useFocusEffect(
+    useCallback(() => {
+      const checkAuth = async () => {
+        try {
+          const token = await AsyncStorage.getItem('authToken');
+          console.log("Auth token found:", token ? "Yes" : "No");
+          setAuthToken(token);
+          fetchPosts();
+        } catch (error) {
+          console.error("Error retrieving auth token:", error);
+        }
+      };
+      checkAuth();
+    }, [])
+  );
+  const addPostToHistory = async (postId: string, judgment: 'YTA' | 'NTA') => {
+    try {
+      // Get fresh token in case it changed
+      const freshToken = await AsyncStorage.getItem('authToken');
+      
+      if (!freshToken) {
+        console.log("User not logged in, skipping history update");
+        return;
+      }
+  
+      const baseUrl = getBaseUrl();
+      console.log(`Saving judgment "${judgment}" for post ${postId}...`);
+  
+      const response = await fetch(`${baseUrl}/api/user/post-history`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${freshToken}`
+        },
+        body: JSON.stringify({
+          post_id: postId,
+          judgment: judgment
+        }),
+      });
+  
+      const responseData = await response.json();
+  
+      if (!response.ok) {
+        console.error('API Error:', {
+          status: response.status,
+          error: responseData.error || 'Unknown error'
+        });
+        return;
+      }
+  
+      console.log('Successfully saved to history:', responseData);
+    } catch (error) {
+      console.error('Network/post-history error:', error);
+      // Optional: Add retry logic here if needed
+    }
+  };
+  
 
+  // Update the panResponder to make it more responsive
   const panResponder = useRef(
-        PanResponder.create({
-          onStartShouldSetPanResponder: () => true,
-          onPanResponderMove: (_, gesture) => {
-            position.setValue({ x: gesture.dx, y: gesture.dy })
-          },
-          onPanResponderRelease: (_, gesture) => {
-            if (gesture.dx > SWIPE_THRESHOLD) {
-              swipeRight()
-            } else if (gesture.dx < -SWIPE_THRESHOLD) {
-              swipeLeft()
-            } else {
-              resetPosition()
-            }
-          },
-        })
-      ).current
-    
-    const swipeLeft = () => {
-    Animated.timing(position, {
-      toValue: { x: -SCREEN_WIDTH * 2, y: 0 },
-      duration: 250,
-      useNativeDriver: false,
-    }).start(() => {
-      setCurrentIndex((prev) => prev + 1)
-      position.setValue({ x: 0, y: 0 })
+    PanResponder.create({
+      onStartShouldSetPanResponder: (_, gesture) => {
+        // Only start pan responder for horizontal swipes greater than 10px
+        // This will allow vertical scrolling to work normally
+        return Math.abs(gesture.dx) > Math.abs(gesture.dy) && Math.abs(gesture.dx) > 10;
+      },
+      onMoveShouldSetPanResponder: (_, gesture) => {
+        // Only take over if the movement is primarily horizontal
+        return Math.abs(gesture.dx) > Math.abs(gesture.dy) && Math.abs(gesture.dx) > 10;
+      },
+      onPanResponderMove: (_, gesture) => {
+        position.setValue({ x: gesture.dx, y: gesture.dy });
+        // Update the swipe direction for visual feedback
+        if (gesture.dx > 20) {
+          setSwipeDirection('right');
+        } else if (gesture.dx < -20) {
+          setSwipeDirection('left');
+        } else {
+          setSwipeDirection(null);
+        }
+      },
+      onPanResponderRelease: (_, gesture) => {
+        // Log the gesture details for debugging
+        console.log(`Gesture release: dx=${gesture.dx}, threshold=${SWIPE_THRESHOLD}`);
+        
+        if (gesture.dx > SWIPE_THRESHOLD) {
+          console.log("Detected right swipe gesture");
+          // swipeRight();
+        } else if (gesture.dx < -SWIPE_THRESHOLD) {
+          console.log("Detected left swipe gesture");
+          // swipeLeft();
+        } else {
+          console.log("Resetting position - below threshold");
+          // resetPosition();
+        }
+      },
     })
-  }
+  ).current;
+
+  // Simplified swipe functions
+  const swipeLeft = () => {
+    console.log("Executing swipeLeft function");
+    // Check if there are posts and if currentIndex is valid
+    if (posts && posts.length > 0 && currentIndex < posts.length) {
+      const currentPost = posts[currentIndex];
+      console.log(`Swiped LEFT (YTA) on post ${currentPost.id}`);
+      
+      // If in confirmation mode, move to the next post
+      if (showConfirmation) {
+        setShowConfirmation(false);
+        setCurrentIndex(currentIndex + 1);
+        position.setValue({ x: 0, y: 0 });
+        return;
+      }
+      
+      // Immediately animate the card away
+      // Animated.timing(position, {
+      //   toValue: { x: -SCREEN_WIDTH * 1.5, y: 0 },
+      //   duration: 300,
+      //   useNativeDriver: false,
+      // }).start(() => {
+      //   console.log("Left swipe animation completed");
+      //   // Add judgment to history
+      //   addPostToHistory(currentPost.id, "YTA");
+        
+      //   // Get community stats and AI judgment
+      //   getCommunityStats(currentPost.id);
+      //   fetchAiJudgment(currentPost.content);
+        
+      //   // Save the current post and judgment for confirmation
+      //   setLastSwipedPost(currentPost);
+      //   setLastJudgment("YTA");
+      //   setShowConfirmation(true);
+      //   position.setValue({ x: 0, y: 0 });
+      // });
+    } else {
+      console.log("No posts available or currentIndex out of bounds");
+      position.setValue({ x: 0, y: 0 });
+    }
+  };
 
   const swipeRight = () => {
-    Animated.timing(position, {
-      toValue: { x: SCREEN_WIDTH * 2, y: 0 },
-      duration: 250,
-      useNativeDriver: false,
-    }).start(() => {
-      setCurrentIndex((prev) => prev + 1)
-      position.setValue({ x: 0, y: 0 })
-    })
-  }
+    console.log("Executing swipeRight function");
+    // Check if there are posts and if currentIndex is valid
+    if (posts && posts.length > 0 && currentIndex < posts.length) {
+      const currentPost = posts[currentIndex];
+      console.log(`Swiped RIGHT (NTA) on post ${currentPost.id}`);
+      
+      // If in confirmation mode, move to the next post
+      if (showConfirmation) {
+        setShowConfirmation(false);
+        setCurrentIndex(currentIndex + 1);
+        position.setValue({ x: 0, y: 0 });
+        return;
+      }
+      
+      // Immediately animate the card away
+      // Animated.timing(position, {
+      //   toValue: { x: SCREEN_WIDTH * 1.5, y: 0 },
+      //   duration: 300,
+      //   useNativeDriver: false,
+      // }).start(() => {
+      //   console.log("Right swipe animation completed");
+      //   // Add judgment to history
+      //   addPostToHistory(currentPost.id, "NTA");
+        
+      //   // Get community stats and AI judgment
+      //   getCommunityStats(currentPost.id);
+      //   fetchAiJudgment(currentPost.content);
+        
+      //   // Save the current post and judgment for confirmation
+      //   setLastSwipedPost(currentPost);
+      //   setLastJudgment("NTA");
+      //   setShowConfirmation(true);
+      //   position.setValue({ x: 0, y: 0 });
+      // });
+    } else {
+      console.log("No posts available or currentIndex out of bounds");
+      position.setValue({ x: 0, y: 0 });
+    }
+  };
 
   const resetPosition = () => {
-    Animated.spring(position, {
-      toValue: { x: 0, y: 0 },
-      useNativeDriver: false,
-    }).start()
-  }
+    // Animated.spring(position, {
+    //   toValue: { x: 0, y: 0 },
+    //   friction: 5,
+    //   useNativeDriver: false,
+    // }).start();
+    setSwipeDirection(null);
+    setIsExpanded(false);
+  };
 
   const getCardStyle = () => {
     const rotate = position.x.interpolate({
@@ -78,33 +264,227 @@ export default function Home() {
   }
 
   const fetchPosts = async () => {
+    setIsLoading(true);
     try {
-      const response = await fetch('https://www.reddit.com/r/AmItheAsshole.json')
+      // Add limit=3 to fetch only 3 posts
+      const response = await fetch('https://www.reddit.com/r/AmItheAsshole.json?limit=3')
       const data = await response.json()
-      const fetchedPosts = data.data.children.map((child: any) => ({
-        id: child.data.id,
-        title: child.data.title,
-        content: child.data.selftext,
-        category: child.data.link_flair_text || "Uncategorized",
-        upvotes: child.data.ups,
-        comments: child.data.num_comments,
-      }))
-      setPosts(fetchedPosts)
+      
+      // Map the Reddit posts to our format
+      const fetchedPosts = await Promise.all(data.data.children.slice(0, 3).map(async (child: any) => {
+        const postContent = child.data.selftext;
+        let tldrText = ""; // Default empty TLDR
+        
+        // Fetch TLDR for the post
+        try {
+          const baseUrl = getBaseUrl();
+          console.log("Using API base URL:", baseUrl);
+          
+          const tldrResponse = await fetch(`${baseUrl}/api/gemini/tldr`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${await AsyncStorage.getItem('authToken')}`
+            },
+            body: JSON.stringify({
+              post_content: postContent,
+            }),
+          });
+          
+          if (tldrResponse.ok) {
+            const tldrData = await tldrResponse.json();
+            tldrText = tldrData.tldr || '';
+            console.log("Received TLDR:", tldrText);
+          } else {
+            console.error("TLDR API error status:", tldrResponse.status);
+            const errorText = await tldrResponse.text();
+            console.error("TLDR API error:", errorText);
+          }
+        } catch (error) {
+          console.error('Error fetching TLDR:', error);
+        }
+        
+        // Return the full post object with TLDR
+        return {
+          id: child.data.id,
+          title: child.data.title,
+          content: child.data.selftext,
+          tldr: tldrText,
+          category: child.data.link_flair_text || "Uncategorized",
+          upvotes: child.data.ups,
+          comments: child.data.num_comments,
+        };
+      }));
+      
+      console.log(`Loaded ${fetchedPosts.length} posts with TLDRs`);
+      setPosts(fetchedPosts);
+      setCurrentIndex(0);
     } catch (error) {
-      console.error("Error fetching posts:", error)
+      console.error("Error fetching posts:", error);
+    } finally {
+      setIsLoading(false);
     }
   }
 
+  const getCommunityStats = async (postId: string) => {
+    try {
+      // Call the backend endpoint to analyze comments
+      const baseUrl = getBaseUrl();
+      const response = await fetch(`${baseUrl}/api/gemini/analyze-comments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${await AsyncStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({
+          post_id: postId
+        }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        // Use the actual counts to calculate percentages
+        const ytaCount = data.yta_count || 0;
+        const ntaCount = data.nta_count || 0;
+        const total = ytaCount + ntaCount;
+        
+        if (total > 0) {
+          const yesPercent = Math.round((ytaCount / total) * 100);
+          const noPercent = Math.round((ntaCount / total) * 100);
+          setCommunityStats({ 
+            yesPercent, 
+            noPercent 
+          });
+        } else {
+          // If no comments are analyzed, default to 50/50
+          setCommunityStats({ yesPercent: 50, noPercent: 50 });
+        }
+      } else {
+        // Use default values if there's an error
+        setCommunityStats({ yesPercent: 50, noPercent: 50 });
+      }
+    } catch (error) {
+      console.error('Error fetching community stats:', error);
+      setCommunityStats({ yesPercent: 50, noPercent: 50 });
+    }
+  };
+
+  const fetchAiJudgment = async (postContent: string) => {
+    try {
+      const baseUrl = getBaseUrl();
+      const response = await fetch(`${baseUrl}/api/gemini/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${await AsyncStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({
+          input: postContent
+        }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAiJudgment(data.judgment || "Unable to generate AI judgment");
+      } else {
+        setAiJudgment("Unable to generate AI judgment");
+      }
+    } catch (error) {
+      console.error("Error fetching AI judgment:", error);
+      setAiJudgment("Unable to generate AI judgment");
+    }
+  };
+
+  const handleSwipe = (direction: 'left' | 'right') => {
+    if (direction === 'left') {
+      // Instead of using animation, directly update state
+      if (posts && posts.length > 0 && currentIndex < posts.length) {
+        const currentPost = posts[currentIndex];
+        console.log(`Judged post ${currentPost.id} as YTA`);
+        
+        // Add judgment to history
+        addPostToHistory(currentPost.id, "YTA");
+        
+        // Get community stats and AI judgment
+        getCommunityStats(currentPost.id);
+        fetchAiJudgment(currentPost.content);
+        
+        // Save the current post and judgment for confirmation
+        setLastSwipedPost(currentPost);
+        setLastJudgment("YTA");
+        setShowConfirmation(true);
+      }
+    } else {
+      // For right swipe (NTA)
+      if (posts && posts.length > 0 && currentIndex < posts.length) {
+        const currentPost = posts[currentIndex];
+        console.log(`Judged post ${currentPost.id} as NTA`);
+        
+        // Add judgment to history
+        addPostToHistory(currentPost.id, "NTA");
+        
+        // Get community stats and AI judgment
+        getCommunityStats(currentPost.id);
+        fetchAiJudgment(currentPost.content);
+        
+        // Save the current post and judgment for confirmation
+        setLastSwipedPost(currentPost);
+        setLastJudgment("NTA");
+        setShowConfirmation(true);
+      }
+    }
+  };
+
   const renderCards = () => {
-    if (currentIndex >= posts.length) {
+    // If showing confirmation card, render that instead of normal cards
+    if (showConfirmation && lastSwipedPost) {
       return (
-        <View style={styles.noMoreCards}>
-          <Text style={styles.noMoreCardsText}>No more posts!</Text>
-          <TouchableOpacity style={styles.refreshButton} onPress={() => setCurrentIndex(0)}>
-            <Text style={styles.refreshButtonText}>Start Over</Text>
-          </TouchableOpacity>
+        <View style={styles.cardOriginal}>
+          <ScrollView 
+            style={styles.scrollContainer}
+            contentContainerStyle={styles.scrollContentContainer}
+            showsVerticalScrollIndicator={true}
+          >
+            <View style={styles.cardContent}>
+              <Text style={styles.cardTitle}>{lastSwipedPost.title}</Text>
+              
+              <View style={styles.judgmentSummary}>
+                <Text style={styles.judgmentSummaryTitle}>Your Judgment</Text>
+                <View style={[
+                  styles.judgmentBadge, 
+                  lastJudgment === "YTA" ? styles.ytaBadge : styles.ntaBadge
+                ]}>
+                  <Text style={styles.judgmentBadgeText}>{lastJudgment}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.separator} />
+              
+              <View style={styles.statSection}>
+                <Text style={styles.sectionTitle}>Community Result</Text>
+                <View style={styles.statBarContainer}>
+                  <View style={[styles.statBar, styles.ytaBar, { flex: communityStats.yesPercent }]} />
+                  <View style={[styles.statBar, styles.ntaBar, { flex: communityStats.noPercent }]} />
+                </View>
+                <View style={styles.statLabels}>
+                  <Text style={styles.statLabel}>YTA: {communityStats.yesPercent}%</Text>
+                  <Text style={styles.statLabel}>NTA: {communityStats.noPercent}%</Text>
+                </View>
+              </View>
+              
+              <View style={styles.separator} />
+              
+              <View style={styles.aiSection}>
+                <Text style={styles.sectionTitle}>AI Judgment</Text>
+                <Text style={styles.aiJudgmentText}>{aiJudgment}</Text>
+              </View>
+              
+              {/* Add some padding at the bottom to ensure scrollability for long content */}
+              <View style={{ height: 60 }} />
+            </View>
+          </ScrollView>
         </View>
-      )
+      );
     }
 
     return posts.map((item, index) => {
@@ -113,27 +493,42 @@ export default function Home() {
 
       if (index === currentIndex) {
         return (
-          <Animated.View
+          <View
             key={item.id}
-            style={[styles.card, getCardStyle()]}
-            {...PanResponder.panHandlers}
+            style={styles.card}
           >
-            <View style={styles.cardHeader}>
-              <View style={styles.categoryTag}>
-                <Text style={styles.categoryText}>{item.category}</Text>
+            <ScrollView 
+              style={styles.contentScrollView} 
+              contentContainerStyle={styles.contentContainer}
+              scrollEnabled={true}
+              showsVerticalScrollIndicator={true}
+            >
+              <View style={styles.cardHeader}>
+                <View style={styles.categoryTag}>
+                  <Text style={styles.categoryText}>{item.category}</Text>
+                </View>
+                <TouchableOpacity 
+                  style={styles.tldrButton} 
+                  onPress={() => {
+                    setShowTldr(!showTldr)
+                  }}
+                >
+                  <Text style={styles.tldrButtonText}>TLDR</Text>
+                </TouchableOpacity>
               </View>
-              <View style={styles.commentsHeader}>
-                <Feather name="message-circle" size={16} color="#718096" />
-                <Text style={styles.commentsHeaderText}>{item.comments}</Text>
+
+              <Text style={styles.cardTitle}>{item.title}</Text>
+              
+              <View style={styles.postContentContainer}>
+                <Text style={styles.cardContentText}>
+                  {showTldr ? item.tldr : item.content}
+                </Text>
               </View>
-            </View>
-
-            <Text style={styles.cardTitle}>{item.title}</Text>
-            <Text style={styles.cardContent}>{item.content}</Text>
-
-            <View style={styles.cardFooter}>
-            </View>
-          </Animated.View>
+              
+              {/* Add some padding at the bottom to ensure scrollability for long content */}
+              <View style={{ height: 60 }} />
+            </ScrollView>
+          </View>
         )
       }
 
@@ -159,20 +554,51 @@ export default function Home() {
           <Feather name="filter" size={22} color="#4A5568" />
         </TouchableOpacity>
       </View>
-
-      <View style={styles.cardsContainer}>{renderCards()}</View>
-
+      
+      <View style={styles.cardsContainer}>
+        {isLoading ? (
+          <View style={styles.noMoreCards}>
+            <Text style={styles.noMoreCardsText}>Loading...</Text>
+          </View>
+        ) : renderCards()}
+      </View>
+      
       <View style={styles.buttonsContainer}>
-        <TouchableOpacity style={[styles.button, styles.dislikeButton]} onPress={() => swipeLeft()}>
-          <Feather name="x" size={28} color="#F56565" />
-          <Text style={[styles.buttonText, { color: '#F56565' }]}>YTA</Text>
+        <TouchableOpacity 
+          style={[styles.button, styles.ytaButton, { width: 110 }]} 
+          onPress={() => {
+            if (showConfirmation) {
+              // If on confirmation screen, move to next post
+              setShowConfirmation(false);
+              setCurrentIndex(currentIndex + 1);
+            } else {
+              // If on regular post, judge as YTA
+              handleSwipe('left');
+            }
+          }}
+        >
+          <Feather name="thumbs-down" size={18} color="#FFF" />
+          <Text style={styles.buttonText}>YTA</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.button, styles.likeButton]} onPress={() => swipeRight()}>
-          <Feather name="check" size={28} color="#48BB78" />
-          <Text style={[styles.buttonText, { color: '#48BB78' }]}>NTA</Text>
+        
+        <TouchableOpacity 
+          style={[styles.button, styles.ntaButton, { width: 110 }]} 
+          onPress={() => {
+            if (showConfirmation) {
+              // If on confirmation screen, move to next post
+              setShowConfirmation(false);
+              setCurrentIndex(currentIndex + 1);
+            } else {
+              // If on regular post, judge as NTA
+              handleSwipe('right');
+            }
+          }}
+        >
+          <Feather name="thumbs-up" size={18} color="#FFF" />
+          <Text style={styles.buttonText}>NTA</Text>
         </TouchableOpacity>
       </View>
-
+      
       <FilterModal visible={showFilterModal} onClose={() => setShowFilterModal(false)} />
     </SafeAreaView>
   )
@@ -187,10 +613,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingTop: 10, 
-    paddingBottom: 5,
-    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    backgroundColor: "#FFFFFF",
     zIndex: 10,
     borderBottomWidth: 0,
   },
@@ -234,21 +660,74 @@ const styles = StyleSheet.create({
   },
   card: {
     position: "absolute",
-    width: SCREEN_WIDTH - 32,
-    height: SCREEN_HEIGHT - 170, 
     backgroundColor: "#FFFFFF",
+    width: SCREEN_WIDTH - 40,
+    minHeight: 400,
+    maxHeight: SCREEN_HEIGHT - 200, 
     borderRadius: 16,
-    padding: 24,
-    paddingTop: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+    marginHorizontal: 20,
+    borderWidth: 1,
+    borderColor: '#EFEFEF',
+  },
+  cardOriginal: {
+    position: "absolute",
+    backgroundColor: "#FFFFFF",
+    width: SCREEN_WIDTH - 40,
+    minHeight: 400,
+    maxHeight: SCREEN_HEIGHT - 200, 
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#EEEEEE',
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.15,
     shadowRadius: 8,
-    elevation: 3,
-    marginHorizontal: 16,
-    marginTop: 10,
+    elevation: 4,
+    marginHorizontal: 20,
+    marginBottom: 20,
+    overflow: "hidden",
+  },
+  scrollContainer: {
+    flex: 1,
+    paddingBottom: 60, 
+  },
+  scrollContentContainer: {
+    flexGrow: 1,
+    paddingBottom: 70,
+  },
+  contentScrollView: {
+    flex: 1,
+    padding: 20,
+    maxHeight: SCREEN_HEIGHT - 180, 
+  },
+  contentContainer: {
+    flexGrow: 1,
+    paddingBottom: 20,
+  },
+  cardContent: {
+    padding: 20,
+    paddingBottom: 30,
+  },
+  cardContentText: {
+    fontSize: 16,
+    color: '#333',
+    lineHeight: 24,
+    marginTop: 0,
+    marginBottom: 0,
+  },
+  postContentContainer: {
+    backgroundColor: '#FAFAFA',
+    padding: 18,
+    borderRadius: 12,
+    marginTop: 15,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#EEEEEE',
   },
   cardHeader: {
     flexDirection: "row",
@@ -268,19 +747,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
-  commentsHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#F7FAFC",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 10,
+  tldrButton: {
+    backgroundColor: "#4A5568",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
   },
-  commentsHeaderText: {
-    marginLeft: 4,
-    color: "#718096",
+  tldrButtonText: {
+    color: "#FFFFFF",
     fontSize: 14,
-    fontWeight: "500",
+    fontWeight: "600",
   },
   cardTitle: {
     fontSize: 24,
@@ -289,69 +765,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     lineHeight: 32,
     marginTop: 12,
-  },
-  cardContent: {
-    fontSize: 17,
-    color: "#4A5568",
-    lineHeight: 26,
-    flex: 1,
-    backgroundColor: '#FAFAFA',
-    padding: 16,
-    borderRadius: 12,
-    marginTop: 8,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#F0F0F0',
-  },
-  cardFooter: {
-    flexDirection: "row",
-    justifyContent: "flex-start",
-    alignItems: "center",
-    marginTop: 15,
-  },
-  buttonsContainer: {
-    flexDirection: "row",
-    justifyContent: "space-evenly",
-    paddingVertical: 20,
-    paddingHorizontal: 30,
-    position: 'absolute',
-    bottom: 20,
-    left: 0,
-    right: 0,
-    backgroundColor: 'transparent',
-  },
-  button: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 5,
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: '#FFFFFF',
-  },
-  likeButton: {
-    borderWidth: 2,
-    borderColor: "#48BB78",
-    shadowColor: "#48BB78",
-    shadowOpacity: 0.2,
-  },
-  dislikeButton: {
-    borderWidth: 2,
-    borderColor: "#F56565",
-    shadowColor: "#F56565",
-    shadowOpacity: 0.2,
-  },
-  buttonText: {
-    color: "#4A5568",
-    fontSize: 14,
-    fontWeight: "700",
-    marginTop: 5,
-    letterSpacing: 0.5,
   },
   noMoreCards: {
     flex: 1,
@@ -388,5 +801,118 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 18,
     fontWeight: "700",
+  },
+  buttonsContainer: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    width: "100%",
+    position: "absolute",
+    bottom: 40,
+    paddingHorizontal: 20,
+    marginTop: 30,
+  },
+  button: {
+    paddingVertical: 14,
+    borderRadius: 30,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  ytaButton: {
+    backgroundColor: '#FF6B6B',
+  },
+  ntaButton: {
+    backgroundColor: '#4ECDC4',
+  },
+  buttonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginLeft: 8,
+  },
+  separator: {
+    height: 1,
+    backgroundColor: '#E0E0E0',
+    marginVertical: 15,
+    width: '100%',
+  },
+  judgmentSummary: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    marginVertical: 10,
+  },
+  judgmentSummaryTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  judgmentBadge: {
+    paddingVertical: 6,
+    paddingHorizontal: 15,
+    borderRadius: 20,
+    marginTop: 5,
+  },
+  ytaBadge: {
+    backgroundColor: '#FF6B6B',
+  },
+  ntaBadge: {
+    backgroundColor: '#4ECDC4',
+  },
+  judgmentBadgeText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  statSection: {
+    width: '100%',
+    marginVertical: 5,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  statBarContainer: {
+    height: 24,
+    flexDirection: 'row',
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  statBar: {
+    height: '100%',
+  },
+  ytaBar: {
+    backgroundColor: '#FF6B6B',
+  },
+  ntaBar: {
+    backgroundColor: '#4ECDC4',
+  },
+  statLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  statLabel: {
+    fontSize: 14,
+    color: '#505050',
+  },
+  aiSection: {
+    marginTop: 10,
+    marginBottom: 10,
+    width: '100%',
+    minHeight: 50, // Minimum height
+    paddingHorizontal: 5, // Add some padding for text
+  },
+  aiJudgmentText: {
+    marginTop: 8,
+    fontSize: 16,
+    color: '#4A5568',
+    lineHeight: 24, // Increased line height for better readability
+    flexWrap: 'wrap', // Ensure text wraps properly
   },
 })

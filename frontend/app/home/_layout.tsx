@@ -9,8 +9,7 @@ export default function HomeLayout() {
         tabBarInactiveTintColor: "#718096",
         tabBarStyle: {
           backgroundColor: "#FFFFFF",
-          borderTopWidth: 1,
-          borderTopColor: "#E2E8F0",
+          borderTopWidth: 0, 
           paddingBottom: 5,
           paddingTop: 5,
           height: 60,
@@ -23,6 +22,13 @@ export default function HomeLayout() {
         options={{
           title: "Home",
           tabBarIcon: ({ color, size }) => <Feather name="home" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="leaderboard"
+        options={{
+          title: "Leaderboard",
+          tabBarIcon: ({ color, size }) => <Feather name="award" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
