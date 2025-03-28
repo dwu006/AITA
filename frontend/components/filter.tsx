@@ -9,10 +9,8 @@ interface FilterModalProps {
 
 export function FilterModal({ visible, onClose }: FilterModalProps) {
   const [selectedCategories, setSelectedCategories] = useState<string[]>([])
-  const [sortBy, setSortBy] = useState<string>("newest")
 
-  const categories = [
-    "Family",
+  const categoryOptions = [
     "Relationships",
     "Work",
     "Money",
@@ -27,12 +25,6 @@ export function FilterModal({ visible, onClose }: FilterModalProps) {
     "Neighbors",
   ]
 
-  const sortOptions = [
-    { id: "newest", label: "Newest First" },
-    { id: "popular", label: "Most Popular" },
-    { id: "controversial", label: "Most Controversial" },
-  ]
-
   const toggleCategory = (category: string) => {
     if (selectedCategories.includes(category)) {
       setSelectedCategories(selectedCategories.filter((c) => c !== category))
@@ -43,12 +35,9 @@ export function FilterModal({ visible, onClose }: FilterModalProps) {
 
   const resetFilters = () => {
     setSelectedCategories([])
-    setSortBy("newest")
   }
 
   const applyFilters = () => {
-    // Here you would apply the filters to your data
-    // For now, we'll just close the modal
     onClose()
   }
 
@@ -67,7 +56,7 @@ export function FilterModal({ visible, onClose }: FilterModalProps) {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Categories</Text>
               <View style={styles.categoriesContainer}>
-                {categories.map((category) => (
+                {categoryOptions.map((category) => (
                   <TouchableOpacity
                     key={category}
                     style={[styles.categoryChip, selectedCategories.includes(category) && styles.categoryChipSelected]}
@@ -84,18 +73,6 @@ export function FilterModal({ visible, onClose }: FilterModalProps) {
                   </TouchableOpacity>
                 ))}
               </View>
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Sort By</Text>
-              {sortOptions.map((option) => (
-                <TouchableOpacity key={option.id} style={styles.sortOption} onPress={() => setSortBy(option.id)}>
-                  <View style={styles.radioButton}>
-                    {sortBy === option.id && <View style={styles.radioButtonSelected} />}
-                  </View>
-                  <Text style={styles.sortOptionText}>{option.label}</Text>
-                </TouchableOpacity>
-              ))}
             </View>
           </ScrollView>
 
@@ -171,31 +148,6 @@ const styles = StyleSheet.create({
   },
   categoryChipTextSelected: {
     color: "#FFFFFF",
-  },
-  sortOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-  },
-  radioButton: {
-    height: 20,
-    width: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: "#CBD5E0",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 10,
-  },
-  radioButtonSelected: {
-    height: 10,
-    width: 10,
-    borderRadius: 5,
-    backgroundColor: "#FF4500",
-  },
-  sortOptionText: {
-    fontSize: 16,
-    color: "#4A5568",
   },
   modalFooter: {
     flexDirection: "row",

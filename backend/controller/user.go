@@ -591,6 +591,126 @@ func (uc *UserController) GetLeaderboard(c *gin.Context) {
 	c.JSON(http.StatusOK, users)
 }
 
+// UpdateUserStats updates a user's stats such as accuracy and post count
+func (uc *UserController) UpdateUserStats(c *gin.Context) {
+	// Get username from JWT
+	username := c.GetString("username")
+	if username == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	// Parse request body with optional fields
+	type UpdateStatsRequest struct {
+		NumPosts         *int     `json:"num_posts,omitempty"`
+		Accuracy         *float64 `json:"accuracy,omitempty"`
+		CorrectJudgments *int     `json:"correct_judgments,omitempty"`
+	}
+
+	var req UpdateStatsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	// Verify at least one field is provided
+	if req.NumPosts == nil && req.Accuracy == nil && req.CorrectJudgments == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "At least one field to update must be provided"})
+		return
+	}
+
+	// Find the user
+	var user User
+	err := uc.collection.FindOne(
+		context.Background(),
+		bson.M{"username": username},
+	).Decode(&user)
+
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		}
+		return
+	}
+
+	// Build update object only with provided fields
+	updateFields := bson.M{}
+	
+	if req.NumPosts != nil {
+		updateFields["num_posts"] = *req.NumPosts
+	}
+	
+	if req.Accuracy != nil {
+		updateFields["accuracy"] = *req.Accuracy
+	}
+	
+	// Create update document
+	update := bson.M{
+		"$set": updateFields,
+	}
+
+	// Perform update
+	_, err = uc.collection.UpdateOne(
+		context.Background(),
+		bson.M{"username": username},
+		update,
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update stats"})
+		return
+	}
+
+	// Only update favorite category if we have post history
+	if req.NumPosts != nil && user.PostHistory != nil && len(user.PostHistory) > 0 {
+		categoryMap := make(map[string]int)
+		
+		// This is a simplification. In a real app, you'd track categories per post
+		// Here we're just updating the fav_category field if we have post history data
+		for _, judgment := range user.PostHistory {
+			if judgment != "" {
+				categoryMap[judgment]++
+			}
+		}
+		
+		// Find most frequent category
+		var maxCount int
+		var favCategory string
+		for cat, count := range categoryMap {
+			if count > maxCount {
+				maxCount = count
+				favCategory = cat
+			}
+		}
+		
+		if favCategory != "" {
+			_, err = uc.collection.UpdateOne(
+				context.Background(),
+				bson.M{"username": username},
+				bson.M{"$set": bson.M{"fav_category": favCategory}},
+			)
+			
+			if err != nil {
+				// Just log the error but continue
+				fmt.Println("Failed to update favorite category:", err)
+			}
+		}
+	}
+
+	// Build response with updated fields
+	response := gin.H{"message": "Stats updated successfully"}
+	if req.NumPosts != nil {
+		response["num_posts"] = *req.NumPosts
+	}
+	if req.Accuracy != nil {
+		response["accuracy"] = *req.Accuracy
+	}
+	
+	c.JSON(http.StatusOK, response)
+}
+
 // Helper function to validate and prepare user update
 func validateAndPrepareUpdate(c *gin.Context, name, newUsername, currentPassword, newPassword, profilePicURL string, user User, uc *UserController) (bson.M, error) {
 	updateFields := bson.M{}

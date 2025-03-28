@@ -89,5 +89,33 @@ func RegisterGeminiRoutes(router *gin.Engine, gc *api.GeminiController) {
 				"total_count": ytaCount + ntaCount,
 			})
 		})
+
+		// Add a route to generate tags for a post
+		geminiRoutes.POST("/generate-tags", func(c *gin.Context) {
+			// Parse request body
+			var requestBody struct {
+				Content string `json:"content" binding:"required"`
+			}
+			
+			if err := c.ShouldBindJSON(&requestBody); err != nil {
+				c.JSON(400, gin.H{"error": "Invalid request format", "details": err.Error()})
+				return
+			}
+			
+			// Create a prompt for generating tags
+			tagsPrompt := "Given the following text, choose 1-2 relevant category tags from this list ONLY: [Relationships, Work, Money, Roommates, Friends, School, Weddings, Parenting, In-Laws, Public, Revenge, Neighbors]. Format your response as a JSON array of strings, e.g. [\"Relationships\", \"Friends\"]. Don't include any other text in your response. Again only from the list. Here's the content: " + requestBody.Content
+			
+			// Generate response using Gemini
+			response, err := gc.GenerateResponse(tagsPrompt)
+			if err != nil {
+				c.JSON(500, gin.H{"error": "Failed to generate tags", "details": err.Error()})
+				return
+			}
+			
+			// Return the generated tags
+			c.JSON(200, gin.H{
+				"tags": response,
+			})
+		})
 	}
 }

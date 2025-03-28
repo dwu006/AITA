@@ -30,7 +30,7 @@ export default function InstructionsScreen() {
             <Text style={styles.stepTitle}>Judge or Be Judged</Text>
             <Text style={styles.stepDescription}>
               AITA lets you be the judge of moral dilemmas posted by real people.
-              Swipe right for "Not The Asshole" (NTA) or left for "You're The Asshole" (YTA).
+              Choose the right button for "Not The Asshole" (NTA) or left button for "You're The Asshole" (YTA).
             </Text>
           </View>
         );
@@ -42,8 +42,7 @@ export default function InstructionsScreen() {
             </View>
             <Text style={styles.stepTitle}>Filter Content</Text>
             <Text style={styles.stepDescription}>
-              Use the filter button to customize your feed.
-              Sort by newest, most controversial, or most commented posts.
+              Use the filter button to choose your favorite category.
             </Text>
           </View>
         );
@@ -53,10 +52,9 @@ export default function InstructionsScreen() {
             <View style={styles.iconContainer}>
               <Feather name="users" size={60} color="#4299E1" />
             </View>
-            <Text style={styles.stepTitle}>Join the Community</Text>
+            <Text style={styles.stepTitle}>The Community</Text>
             <Text style={styles.stepDescription}>
-              See how your judgments compare with others.
-              Add your own comments to explain your reasoning.
+              See how your judgments compare with the Reddit Community and what AI thinks!
             </Text>
           </View>
         );

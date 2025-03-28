@@ -36,6 +36,7 @@ interface Post {
   title: string;
   content: string;
   category: string;
+  categories: string[];
   upvotes: number;
   comments: number;
   tldr: string;
@@ -54,7 +55,8 @@ export default function Home() {
   const [lastSwipedPost, setLastSwipedPost] = useState<Post | null>(null)
   const [communityStats, setCommunityStats] = useState({ yesPercent: 50, noPercent: 50 })
   const [aiJudgment, setAiJudgment] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [judgedPostIds, setJudgedPostIds] = useState<Set<string>>(new Set())
 
   const position = useRef(new Animated.ValueXY()).current
 
@@ -304,19 +306,39 @@ export default function Home() {
           console.error('Error fetching TLDR:', error);
         }
         
-        // Return the full post object with TLDR
+        // Generate tags for the post
+        let categories = [];
+        try {
+          // Generate AI tags
+          const aiTags = await generateTags(postContent);
+          console.log("AI generated tags:", aiTags);
+          
+          categories = aiTags;
+          
+          // If no categories were found, use a default
+          if (categories.length === 0) {
+            categories = ["Uncategorized"];
+          }
+          
+        } catch (error) {
+          console.error('Error generating tags:', error);
+          categories = ["Uncategorized"];
+        }
+        
+        // Return the full post object with TLDR and categories
         return {
           id: child.data.id,
           title: child.data.title,
           content: child.data.selftext,
           tldr: tldrText,
-          category: child.data.link_flair_text || "Uncategorized",
+          category: categories[0], // Primary category
+          categories: categories,  // All categories
           upvotes: child.data.ups,
           comments: child.data.num_comments,
         };
       }));
       
-      console.log(`Loaded ${fetchedPosts.length} posts with TLDRs`);
+      console.log(`Loaded ${fetchedPosts.length} posts with TLDRs and tags`);
       setPosts(fetchedPosts);
       setCurrentIndex(0);
     } catch (error) {
@@ -351,10 +373,15 @@ export default function Home() {
         if (total > 0) {
           const yesPercent = Math.round((ytaCount / total) * 100);
           const noPercent = Math.round((ntaCount / total) * 100);
-          setCommunityStats({ 
-            yesPercent, 
-            noPercent 
-          });
+          const stats = { yesPercent, noPercent };
+          setCommunityStats(stats);
+          
+          // Check if user's judgment matches community consensus
+          if (lastJudgment) {
+            const communityConsensus = yesPercent > noPercent ? "YTA" : "NTA";
+            const isCorrect = communityConsensus === lastJudgment;
+            console.log(`User judgment: ${lastJudgment}, Community consensus: ${communityConsensus}, Correct: ${isCorrect}`);
+          }
         } else {
           // If no comments are analyzed, default to 50/50
           setCommunityStats({ yesPercent: 50, noPercent: 50 });
@@ -395,43 +422,137 @@ export default function Home() {
     }
   };
 
-  const handleSwipe = (direction: 'left' | 'right') => {
-    if (direction === 'left') {
-      // Instead of using animation, directly update state
-      if (posts && posts.length > 0 && currentIndex < posts.length) {
-        const currentPost = posts[currentIndex];
-        console.log(`Judged post ${currentPost.id} as YTA`);
-        
-        // Add judgment to history
-        addPostToHistory(currentPost.id, "YTA");
-        
-        // Get community stats and AI judgment
-        getCommunityStats(currentPost.id);
-        fetchAiJudgment(currentPost.content);
-        
-        // Save the current post and judgment for confirmation
-        setLastSwipedPost(currentPost);
-        setLastJudgment("YTA");
-        setShowConfirmation(true);
+  // Function to generate tags for a post using AI
+  const generateTags = async (postContent: string): Promise<string[]> => {
+    try {
+      const baseUrl = getBaseUrl();
+      const response = await fetch(`${baseUrl}/api/gemini/generate-tags`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${await AsyncStorage.getItem('authToken')}`
+        },
+        body: JSON.stringify({
+          content: postContent
+        }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        // Parse the JSON string returned by the API
+        try {
+          let tags;
+          // Handle case where tags might be a string representation of JSON
+          if (typeof data.tags === 'string') {
+            tags = JSON.parse(data.tags);
+          } else {
+            tags = data.tags;
+          }
+          
+          if (Array.isArray(tags)) {
+            return tags;
+          } else {
+            console.error("Invalid tags format:", tags);
+            return [];
+          }
+        } catch (parseError) {
+          console.error("Error parsing tags:", parseError);
+          return [];
+        }
+      } else {
+        console.error("Failed to generate tags:", response.status);
+        return [];
       }
-    } else {
-      // For right swipe (NTA)
-      if (posts && posts.length > 0 && currentIndex < posts.length) {
-        const currentPost = posts[currentIndex];
-        console.log(`Judged post ${currentPost.id} as NTA`);
+    } catch (error) {
+      console.error("Error generating tags:", error);
+      return [];
+    }
+  };
+
+  const handleSwipe = async (direction: 'left' | 'right') => {
+    if (posts && posts.length > 0 && currentIndex < posts.length) {
+      const currentPost = posts[currentIndex];
+      const judgment = direction === 'left' ? 'YTA' : 'NTA';
+      
+      // Add judgment to history
+      await addPostToHistory(currentPost.id, judgment);
+      
+      // Get community stats and AI judgment
+      await getCommunityStats(currentPost.id);
+      await fetchAiJudgment(currentPost.content);
+      
+      // Check if this post has been judged before
+      if (!judgedPostIds.has(currentPost.id)) {
+        // Update user stats for a new post judgment
+        const communityJudgment = communityStats.yesPercent > communityStats.noPercent ? 'YTA' : 'NTA';
+        const isCorrect = judgment === communityJudgment;
+        await updateAccuracyStats(isCorrect);
         
-        // Add judgment to history
-        addPostToHistory(currentPost.id, "NTA");
-        
-        // Get community stats and AI judgment
-        getCommunityStats(currentPost.id);
-        fetchAiJudgment(currentPost.content);
-        
-        // Save the current post and judgment for confirmation
-        setLastSwipedPost(currentPost);
-        setLastJudgment("NTA");
-        setShowConfirmation(true);
+        // Mark this post as judged so we don't count it again
+        const newJudgedPostIds = new Set(judgedPostIds);
+        newJudgedPostIds.add(currentPost.id);
+        setJudgedPostIds(newJudgedPostIds);
       }
+      
+      // Save the current post and judgment for confirmation
+      setLastSwipedPost(currentPost);
+      setLastJudgment(judgment);
+      setShowConfirmation(true);
+    }
+  };
+
+  const updateAccuracyStats = async (isCorrect: boolean) => {
+    try {
+      // Get current user profile
+      const userData = await AsyncStorage.getItem('userProfile');
+      let profile: any = {};
+      
+      if (userData) {
+        profile = JSON.parse(userData);
+      } else {
+        // Initialize with default values if no profile exists
+        profile = {
+          num_posts: 0,
+          correct_judgments: 0,
+          accuracy: 0
+        };
+      }
+
+      // Update stats
+      profile.num_posts = (profile.num_posts || 0) + 1;
+      profile.correct_judgments = (profile.correct_judgments || 0) + (isCorrect ? 1 : 0);
+      profile.accuracy = Math.round((profile.correct_judgments / profile.num_posts) * 100);
+
+      // Save to local storage
+      await AsyncStorage.setItem('userProfile', JSON.stringify(profile));
+
+      // Update server stats if user is logged in
+      const token = await AsyncStorage.getItem('authToken');
+      if (token) {
+        try {
+          const baseUrl = getBaseUrl();
+          const response = await fetch(`${baseUrl}/api/user/update-stats`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              num_posts: profile.num_posts,
+              accuracy: profile.accuracy,
+              correct_judgments: profile.correct_judgments
+            }),
+          });
+
+          if (!response.ok) {
+            console.error('Failed to update user stats on server');
+          }
+        } catch (error) {
+          console.error('Error updating user stats:', error);
+        }
+      }
+    } catch (error) {
+      console.error('Error updating accuracy stats:', error);
     }
   };
 
@@ -504,9 +625,17 @@ export default function Home() {
               showsVerticalScrollIndicator={true}
             >
               <View style={styles.cardHeader}>
-                <View style={styles.categoryTag}>
-                  <Text style={styles.categoryText}>{item.category}</Text>
-                </View>
+                <ScrollView 
+                  horizontal={true}
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.categoryTagsContainer}
+                >
+                  {item.categories.map((tag, tagIndex) => (
+                    <View key={tagIndex} style={styles.categoryTag}>
+                      <Text style={styles.categoryText}>{tag}</Text>
+                    </View>
+                  ))}
+                </ScrollView>
                 <TouchableOpacity 
                   style={styles.tldrButton} 
                   onPress={() => {
@@ -565,7 +694,7 @@ export default function Home() {
       
       <View style={styles.buttonsContainer}>
         <TouchableOpacity 
-          style={[styles.button, styles.ytaButton, { width: 110 }]} 
+          style={[styles.button, styles.ytaButton, { width: 90 }]} 
           onPress={() => {
             if (showConfirmation) {
               // If on confirmation screen, move to next post
@@ -582,7 +711,7 @@ export default function Home() {
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={[styles.button, styles.ntaButton, { width: 110 }]} 
+          style={[styles.button, styles.ntaButton, { width: 90 }]} 
           onPress={() => {
             if (showConfirmation) {
               // If on confirmation screen, move to next post
@@ -640,7 +769,7 @@ const styles = StyleSheet.create({
     color: '#FF4500',
   },
   greenText: {
-    color: '#48BB78',
+    color: '#4CAF50',
   },
   filterButton: {
     padding: 8,
@@ -735,17 +864,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
+  categoryTagsContainer: {
+    flexGrow: 0,
+    flexShrink: 1,
+    maxWidth: '70%',
+  },
   categoryTag: {
     backgroundColor: "#FF4500",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 16,
+    marginRight: 8,
   },
   categoryText: {
+    fontSize: 12,
     color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "700",
+    fontWeight: "600",
   },
   tldrButton: {
     backgroundColor: "#4A5568",
@@ -812,7 +946,8 @@ const styles = StyleSheet.create({
     marginTop: 30,
   },
   button: {
-    paddingVertical: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
     borderRadius: 30,
     flexDirection: "row",
     justifyContent: "center",
@@ -824,16 +959,16 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   ytaButton: {
-    backgroundColor: '#FF6B6B',
+    backgroundColor: "#FF4500",
   },
   ntaButton: {
-    backgroundColor: '#4ECDC4',
+    backgroundColor: "#4CAF50",
   },
   buttonText: {
     color: 'white',
     fontWeight: 'bold',
-    fontSize: 16,
-    marginLeft: 8,
+    fontSize: 14,
+    marginLeft: 5,
   },
   separator: {
     height: 1,
@@ -853,15 +988,15 @@ const styles = StyleSheet.create({
   },
   judgmentBadge: {
     paddingVertical: 6,
-    paddingHorizontal: 15,
-    borderRadius: 20,
-    marginTop: 5,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginTop: 10,
   },
   ytaBadge: {
-    backgroundColor: '#FF6B6B',
+    backgroundColor: "#FF4500",
   },
   ntaBadge: {
-    backgroundColor: '#4ECDC4',
+    backgroundColor: "#4CAF50",
   },
   judgmentBadgeText: {
     color: 'white',
@@ -888,10 +1023,10 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   ytaBar: {
-    backgroundColor: '#FF6B6B',
+    backgroundColor: "#FF4500",
   },
   ntaBar: {
-    backgroundColor: '#4ECDC4',
+    backgroundColor: "#4CAF50",
   },
   statLabels: {
     flexDirection: 'row',

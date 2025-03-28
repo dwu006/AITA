@@ -25,6 +25,7 @@ func RegisterUserRoutes(router *gin.Engine, uc *controller.UserController) {
 		userRoutes.GET("/profile", uc.FetchUser)
 		userRoutes.PUT("/update", uc.UpdateUser)
 		userRoutes.POST("/post-history", uc.AddPostToHistory) // Add post to user's history
+		userRoutes.POST("/update-stats", uc.UpdateUserStats)  // Update user's accuracy stats
 	}
 
 	// Leaderboard routes - protected by auth middleware
